@@ -8,8 +8,8 @@ using UnityEngine.InputSystem;
 public sealed class AnimeCharacterController : MonoBehaviour
 {
     [Header("Locomotion Speeds (m/s)")]
-    [SerializeField] private float walkSpeed = 3.0f;
-    [SerializeField] private float runSpeed = 6.5f;
+    [SerializeField] private float walkSpeed = 2.2f;
+    [SerializeField] private float runSpeed = 5.0f;
     [SerializeField] private float sprintSpeed = 10.0f;
 
     [Header("Rotation Tuning")]
@@ -151,12 +151,16 @@ public sealed class AnimeCharacterController : MonoBehaviour
         controller.Move(verticalVelocity * Time.deltaTime);
     }
 
+    private static readonly int SpeedHash = Animator.StringToHash("Speed");
+    private static readonly int IsGroundedHash = Animator.StringToHash("IsGrounded");
+    private static readonly int VerticalVelocityHash = Animator.StringToHash("VerticalVelocity");
+
     private void UpdateAnimator()
     {
         if (animator == null) return;
-        animator.SetFloat("Speed", currentSpeedMagnitude, 0.1f, Time.deltaTime);
-        animator.SetBool("IsGrounded", IsGrounded);
-        animator.SetFloat("VerticalVelocity", verticalVelocity.y);
+        animator.SetFloat(SpeedHash, currentSpeedMagnitude, 0.15f, Time.deltaTime);
+        animator.SetBool(IsGroundedHash, IsGrounded);
+        animator.SetFloat(VerticalVelocityHash, verticalVelocity.y);
     }
 
     private Vector2 ReadMoveInput()

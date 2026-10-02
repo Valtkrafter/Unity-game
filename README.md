@@ -5,36 +5,42 @@ This repository contains the source code for a 3D third-person Unity game featur
 ## Current Features & State
 
 ### 1. Character & Movement
-- **Anime Character Controller (`AnimeCharacterController.cs`)**: Handles smooth character movement, aligning the character's forward direction with the camera's view.
-  - Walk / Run / Sprint speed tiers (`3.0` / `6.5` / `10.0`)
-  - Gravity-based jumping (`jumpHeight: 1.8`)
-  - Rotation smoothing (`0.08s`)
-- **Character Model — Nino Nakano (VRM)**: The active player avatar is **Nino Nakano**, imported via UniVRM.
+- **Anime Character Controller (`AnimeCharacterController.cs`)**: Handles responsive character movement, aligning the character's forward direction with the camera's planar view.
+  - **Calibrated Movement Speeds**: Walk `2.2 m/s` · Run `5.0 m/s` · Sprint `10.0 m/s` (precisely tuned to eliminate foot sliding).
+  - Smooth animation parameter damping (`0.15s`) using cached parameter hashes (`Speed`, `IsGrounded`, `VerticalVelocity`).
+  - Gravity-based jumping (`jumpHeight: 1.8`, `gravity: -25.0`).
+  - Rotation smoothing (`0.08s`).
+- **Character Model — Nino Nakano (VRM)**: Active player avatar imported via UniVRM.
   - Located at `Assets/Models/Nino Nakano/` (VRM source: `5394265126170879566.vrm`).
-  - Instantiated in the scene as `Player > Nino_Model` with local transforms reset to identity (`pos 0,0,0 · rot 0,0,0 · scale 1,1,1`).
-  - Humanoid `VrmAvatar` is valid and assigned to the `Animator` component.
-  - `applyRootMotion = false` — movement is driven entirely by `AnimeCharacterController`.
-  - 20 materials, all rendering correctly under URP (no missing/pink shaders).
+  - Instantiated in the scene as `Player > Nino_Model` with local transforms synchronized to clean T-pose (`pos 0,0,0 · rot 0,0,0 · scale 1,1,1`).
+  - SkinnedMeshRenderers configured with `Bone4` quality and `Update When Offscreen = true`.
+  - `applyRootMotion = false` — translation is managed entirely by `AnimeCharacterController`.
+  - **VRM SpringBone Physics Stabilization**:
+    - **Hair Groups (17 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.25`, `Stiffness: 0.15`, `Drag: 0.4` (prevents horn/antenna flipping during forward motion).
+    - **Skirt & Coat Groups (6 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.20`, `Stiffness: 0.25`, `Drag: 0.4` (eliminates high-frequency lower-body vibration).
 - **CharacterController** (on `Player` root):
   - `Height: 1.6` · `Center Y: 0.8` · `Radius: 0.35`
 
 ### 2. Animation System
-- **Mixamo Locomotion Pack** (`Assets/Animations/Female Locomotion Pack/`):
-  - 10 humanoid FBX clips from Mixamo: idle, walking, running, jump, left/right strafe, left/right strafe walk, left/right turn.
-  - All clips imported with `avatarSetup = CreateFromThisModel` to avoid "Transform hierarchy does not match" errors with the VRM skeleton.
-  - Locomotion clips: `loopTime = true`, root motion baked into pose (Rotation, Y, XZ).
-  - Jump clip: `loopTime = false`.
+- **Active Locomotion Clips** (`Assets/Animations/`):
+  - **Idle (`X Bot@Female Standing Pose.fbx`)**: Clean, flat-foot neutral stance.
+  - **Walk (`X Bot@Female Walk.fbx`)**: Straightforward stride with centered pelvic translation.
+  - **Run (`X Bot@Running.fbx`)**: Forward running stride with verified knee hinge orientation.
+  - **Jump (`Female Locomotion Pack/jump.fbx`)**: Single-shot jump action.
+- **Humanoid Retargeting & Rig Settings**:
+  - **Toe Bone De-coupling**: `LeftToes` and `RightToes` are unmapped from animation avatar configurations to prevent Mixamo toe-roll rotations from deforming VRM anime shoe meshes.
+  - **Root Transform Rotation**: `bakeIntoPose = true`, `keepOriginalOrientation = false` (Body Orientation — locks pure forward alignment along Z-axis).
+  - **Root Transform Position (Y)**: `bakeIntoPose = true`, `keepOriginalPositionY = true` (Original — locks pelvis height to prevent knee popping).
+  - **Root Transform Position (XZ)**: `bakeIntoPose = true`, `keepOriginalPositionXZ = false` (Center of Mass — absorbs lateral displacement).
+  - **Curve Filtering**: Lateral translation tracks (`RootT.x`) and inverted knee/foot twist artifacts flattened to ensure smooth, natural joint flexion.
 - **Animator Controller** (`Assets/Animations/Nino_LocomotionController.controller`):
-  - **Parameters**: `Speed` (Float), `Jump` (Trigger), `SpecialIdle` (Trigger).
+  - **Parameters**: `Speed` (Float), `Jump` (Trigger), `SpecialIdle` (Trigger), `VerticalVelocity` (Float), `IsGrounded` (Bool).
+  - **Base Layer Settings**: `IK Pass = false`, `iKOnFeet = false` across all states (prevents hyper-extending knees on phantom ground planes).
   - **Locomotion Blend Tree** (1D, driven by `Speed`):
-    - `0.0` → idle
-    - `2.5` → walking
-    - `6.0` → running
-    - Automatic thresholds disabled.
-  - **Jump State**: Triggered by `Jump` parameter.
-    - Locomotion → Jump: no exit time, 0.1s crossfade.
-    - Jump → Locomotion: exit time @ 85%, 0.2s crossfade.
-  - Assigned to `Nino_Model` Animator component.
+    - `0.0` → `Female Standing Pose` (100% idle at rest)
+    - `2.2` → `Female Walk` (100% walk cadence)
+    - `5.0` → `Running` (100% run cadence)
+  - **Jump State**: Triggered by `Jump` parameter with crossfade exit back to Locomotion.
 
 ### 3. Camera System
 - **Third-Person Orbit Camera (`ThirdPersonOrbitCamera.cs`)**:
@@ -51,20 +57,16 @@ This repository contains the source code for a 3D third-person Unity game featur
 ```
 Assets/
 ├── Animations/
-│   └── Female Locomotion Pack/   # 10 Mixamo humanoid FBX clips
-│       ├── idle.fbx
-│       ├── walking.fbx
-│       ├── running.fbx
-│       ├── jump.fbx
-│       ├── left strafe.fbx / left strafe walk.fbx
-│       ├── right strafe.fbx / right strafe walk.fbx
-│       ├── left turn.fbx / right turn.fbx
-│       └── Nino_LocomotionController.controller
+│   ├── Nino_LocomotionController.controller  # Active locomotion state machine
+│   ├── X Bot@Female Standing Pose.fbx         # Clean neutral idle stance
+│   ├── X Bot@Female Walk.fbx                  # Centered forward walk clip
+│   ├── X Bot@Running.fbx                      # Calibrated forward run clip
+│   └── Female Locomotion Pack/                # Supplementary clips (jump, strafes, turns)
+│       └── jump.fbx
 ├── Editor/
-│   └── FixMixamoLocomotionImports.cs  # One-shot import fixer tool
+│   └── PurgeHuTaoAndUpgradeNino.cs            # Asset maintenance utilities
 ├── Models/
-│   ├── HuoTao/              # Legacy Hu Tao model (no longer active in scene)
-│   └── Nino Nakano/          # Active VRM avatar
+│   └── Nino Nakano/                           # Active VRM player avatar
 │       ├── 5394265126170879566.vrm
 │       ├── 5394265126170879566.prefab
 │       ├── 5394265126170879566.Avatar/
@@ -73,8 +75,8 @@ Assets/
 │       ├── 5394265126170879566.Textures/
 │       └── 5394265126170879566.BlendShapes/
 └── Scripts/
-    ├── AnimeCharacterController.cs
-    └── ThirdPersonOrbitCamera.cs
+    ├── AnimeCharacterController.cs            # Movement and locomotion logic
+    └── ThirdPersonOrbitCamera.cs              # Orbit camera with collision damping
 ```
 
 ## Scene Hierarchy
