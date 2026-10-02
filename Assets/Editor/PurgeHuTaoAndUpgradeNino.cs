@@ -21,9 +21,7 @@ public static class PurgeHuTaoAndUpgradeNino
     public static void Execute()
     {
         PurgeHuTao();
-        UpgradeNinoMaterials();
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
+        RestoreNinoMaterials.RestoreAll();
         Debug.Log("[NinoUpgrade] ★ All done.");
     }
 

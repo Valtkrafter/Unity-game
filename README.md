@@ -21,7 +21,24 @@ This repository contains the source code for a 3D third-person Unity game featur
 - **CharacterController** (on `Player` root):
   - `Height: 1.6` · `Center Y: 0.8` · `Radius: 0.35`
 
-### 2. Animation System
+### 2. Shading, Materials & Rendering (URP)
+- **Material Restoration & Pristine VRM Setup**:
+  - Reverted and purged experimental custom toon shaders in favor of native `Universal Render Pipeline/Unlit` configuration mapped precisely to original VRM specifications.
+  - **Transparent Cutout (`Queue: 2450`, `AlphaClip: On`, `Cutoff: 0.5`, Two-sided `Cull: Off`)**:
+    - Applied to hair cards (`HAIR_01`, `HAIR_02`, `HAIR_03`, `HairBack`), clothing (`Tops`, `Bottoms`, `Onepiece`, `Shoes`), skin (`Face_00_SKIN`, `Body_00_SKIN`), and mouth (`FaceMouth`).
+    - Eliminates hair border clipping boxes over facial features while maintaining full two-sided mesh coverage.
+  - **Layered Anime Transparency Ordering**:
+    - `EyeIris` (`Queue: 3000`) & `FaceEyeline` (`Queue: 3000`)
+    - `EyeHighlight` (`Queue: 3500`)
+    - `FaceBrow` (`Queue: 4000`)
+    - `FaceEyelash` (`Queue: 4500`)
+    - Ensures eyes, pupils, eyebrows, and eyelashes render cleanly across front bangs in authentic cel-shaded anime aesthetic.
+- **Shadow Configuration**:
+  - **Face SMR**: `Receive Shadows = false`, `Cast Shadows = Off` (eliminates angular chin/cheek self-shadow polygons and prevents eyes from casting shadows into the cranial cavity).
+  - **Body & Hair SMRs**: `Receive Shadows = true`, `Cast Shadows = On`.
+- **Restoration Tool**: `Assets/Editor/RestoreNinoMaterials.cs` (`Tools/Restore Nino Original VRM Materials (URP)`).
+
+### 3. Animation System
 - **Active Locomotion Clips** (`Assets/Animations/`):
   - **Idle (`X Bot@Female Standing Pose.fbx`)**: Clean, flat-foot neutral stance.
   - **Walk (`X Bot@Female Walk.fbx`)**: Straightforward stride with centered pelvic translation.
@@ -42,14 +59,14 @@ This repository contains the source code for a 3D third-person Unity game featur
     - `5.0` → `Running` (100% run cadence)
   - **Jump State**: Triggered by `Jump` parameter with crossfade exit back to Locomotion.
 
-### 3. Camera System
+### 4. Camera System
 - **Third-Person Orbit Camera (`ThirdPersonOrbitCamera.cs`)**:
   - Orbits smoothly around the player character.
   - Supports mouse look for pitch and yaw.
   - Supports zooming in and out using the mouse scroll wheel.
   - Prevents clipping through geometry by repositioning closer to the player when obstacles block the line of sight.
 
-### 4. Environment
+### 5. Environment
 - A basic testing arena (`Ground_Arena`) is set up for movement and camera collision testing.
 
 ## Project Structure
@@ -64,6 +81,7 @@ Assets/
 │   └── Female Locomotion Pack/                # Supplementary clips (jump, strafes, turns)
 │       └── jump.fbx
 ├── Editor/
+│   ├── RestoreNinoMaterials.cs                # Material & shadow restoration tool
 │   └── PurgeHuTaoAndUpgradeNino.cs            # Asset maintenance utilities
 ├── Models/
 │   └── Nino Nakano/                           # Active VRM player avatar
