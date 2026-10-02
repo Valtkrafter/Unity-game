@@ -21,22 +21,31 @@ This repository contains the source code for a 3D third-person Unity game featur
 - **CharacterController** (on `Player` root):
   - `Height: 1.6` · `Center Y: 0.8` · `Radius: 0.35`
 
-### 2. Shading, Materials & Rendering (URP)
-- **Material Restoration & Pristine VRM Setup**:
-  - Reverted and purged experimental custom toon shaders in favor of native `Universal Render Pipeline/Unlit` configuration mapped precisely to original VRM specifications.
-  - **Transparent Cutout (`Queue: 2450`, `AlphaClip: On`, `Cutoff: 0.5`, Two-sided `Cull: Off`)**:
-    - Applied to hair cards (`HAIR_01`, `HAIR_02`, `HAIR_03`, `HairBack`), clothing (`Tops`, `Bottoms`, `Onepiece`, `Shoes`), skin (`Face_00_SKIN`, `Body_00_SKIN`), and mouth (`FaceMouth`).
-    - Eliminates hair border clipping boxes over facial features while maintaining full two-sided mesh coverage.
-  - **Layered Anime Transparency Ordering**:
-    - `EyeIris` (`Queue: 3000`) & `FaceEyeline` (`Queue: 3000`)
-    - `EyeHighlight` (`Queue: 3500`)
-    - `FaceBrow` (`Queue: 4000`)
-    - `FaceEyelash` (`Queue: 4500`)
-    - Ensures eyes, pupils, eyebrows, and eyelashes render cleanly across front bangs in authentic cel-shaded anime aesthetic.
-- **Shadow Configuration**:
-  - **Face SMR**: `Receive Shadows = false`, `Cast Shadows = Off` (eliminates angular chin/cheek self-shadow polygons and prevents eyes from casting shadows into the cranial cavity).
-  - **Body & Hair SMRs**: `Receive Shadows = true`, `Cast Shadows = On`.
-- **Restoration Tool**: `Assets/Editor/RestoreNinoMaterials.cs` (`Tools/Restore Nino Original VRM Materials (URP)`).
+### 2. Shading, Materials & Rendering (Unity Toon Shader / URP)
+- **Official Unity Toon Shader (UTS3 / URP)**:
+  - Migrated avatar materials from standard unlit to official `Unity Toon Shader` (`Toon/Toon` via `com.unity.toonshader`).
+  - **Calibrated 2-Step Anime Cel-Shading**:
+    - `BaseColor_Step`: `0.50` - `0.55` (crisp threshold for anime shadow demarcation).
+    - `BaseShade_Feather`: `0.05` (eliminates muddy gradients, producing sharp cel boundaries).
+    - `_Use_BaseAs1st = 1` & `_Use_1stAs2nd = 1`: Preserves diffuse texture details (buttons, seams, pleats) under shadows.
+    - `_Set_SystemShadowsToBase = 1`: Real-time directional light shadows integrate cleanly without geometric self-shadow noise.
+  - **Anime-Accurate Palette & Shading Calibration**:
+    - **Hair (`HAIR_01`, `02`, `03`, `HairBack`)**: Base `#FFFFFF` with rich magenta shade (`#C43D75`) and dark magenta ink outline (`#52142E`).
+    - **School Uniform Skirt (`Bottoms_01_CLOTH_01`, `02`, `03`)**: Authentic pastel lime anime green (`#9EE37D`) with medium lime cel shade (`#6DB84D`) and dark ink green outline (`#2E5A26`).
+    - **School Shirt & Collar (`Onepiece_00_CLOTH`, `Tops_02_CLOTH`)**: Crisp white base with soft lavender-grey anime shade (`#A5A0B8`).
+    - **Cardigan / Sweater (`Tops_01_CLOTH`)**: Native purple with cool-tinted indigo shade (`#3A3052`).
+    - **Body Skin (`Body_00_SKIN`)**: Soft warm peach anime shade (`#E29D86`).
+    - **Face Skin (`Face_00_SKIN`)**: Pure white base with delicate blush shade (`#FBE6E3`), broad illumination step `0.1`, and zero outline width (`0.0`).
+  - **Inverted-Hull Outlines**:
+    - Mode: `Normal Direction` (`_OUTLINE_NML`).
+    - Width: `1.0` (subtle anime ink line).
+    - Color-coded per material for soft, natural transitions (magenta for hair, dark green for skirt, charcoal for clothing).
+  - **Face & Eye Preservation**:
+    - `Face` SkinnedMeshRenderer: `receiveShadows = false` (completely prevents bangs/hair from casting jagged polygon shadow shards on the face).
+    - Eyes (`EyeIris`, `EyeHighlight`, `EyeWhite`): Preserved on `Universal Render Pipeline/Unlit` for maximum luminescence and clarity.
+    - Eyebrows (`FaceBrow`): Explicit `renderQueue = 3001` so eyebrows layer cleanly over hair strands.
+- **Material Backup**:
+  - Original VRM URP Unlit materials backed up safely at `Assets/Models/Nino Nakano/Backup_Materials_URP_Unlit/`.
 
 ### 3. Animation System
 - **Active Locomotion Clips** (`Assets/Animations/`):
