@@ -204,13 +204,16 @@ public sealed class ThirdPersonOrbitCamera : MonoBehaviour
     {
         look = Vector2.zero;
         scroll = 0f;
-        if (Cursor.lockState != CursorLockMode.Locked) return;
+        bool locked = Cursor.lockState == CursorLockMode.Locked; // orbit only while locked; zoom always
 
 #if ENABLE_INPUT_SYSTEM
         if (Mouse.current != null)
         {
-            look = Mouse.current.delta.ReadValue();               // pixels this frame
-            scroll = Mouse.current.scroll.ReadValue().y / 120f;  // notches
+            if (locked) look = Mouse.current.delta.ReadValue(); // pixels this frame
+            // Input System 1.8+ reports one notch as 1 (ScrollDeltaBehavior.UniformAcrossAllPlatforms);
+            // older versions / KeepPlatformSpecificInputRange report 120 per notch on Windows.
+            float raw = Mouse.current.scroll.ReadValue().y;
+            scroll = Mathf.Abs(raw) >= 20f ? raw / 120f : raw;
             return;
         }
 #endif
@@ -218,7 +221,7 @@ public sealed class ThirdPersonOrbitCamera : MonoBehaviour
         try
         {
             // Legacy axes are already scaled by the input manager's sensitivity (~0.1 per pixel).
-            look = new Vector2(Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y")) * 10f;
+            if (locked) look = new Vector2(Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y")) * 10f;
             scroll = Input.mouseScrollDelta.y;
         }
         catch { }

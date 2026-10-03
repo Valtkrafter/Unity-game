@@ -15,11 +15,17 @@ This repository contains the source code for a 3D third-person Unity game featur
 - **Character Model — Nino Nakano (VRM)**: Active player avatar imported via UniVRM.
   - Located at `Assets/Models/Nino Nakano/` (VRM source: `5394265126170879566.vrm`).
   - Instantiated in the scene as `Player > Nino_Model` at real-world size (~1.65 m, `humanScale 0.96`): `pos 0,-0.02,0 · rot 0,0,0 · scale 1,1,1`. The `-0.02` offset compensates the CharacterController skin width (`0.05`) so the shoe soles sit on the floor (measured from the baked mesh in Play Mode: idle sole at `-0.1 cm`).
-  - SkinnedMeshRenderers configured with `Bone4` quality and `Update When Offscreen = true`.
+  - SkinnedMeshRenderers: `Bone4` quality, `Update When Offscreen = false` with fixed 2.6 m bounds (no per-frame bounds recomputation).
   - `applyRootMotion = false` plus `DiscardRootMotion` (handles `OnAnimatorMove`) — translation and height are managed entirely by `AnimeCharacterController`; any unbaked root motion is dropped instead of being written into the pose.
   - **VRM SpringBone Physics Stabilization**:
     - **Hair Groups (17 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.25`, `Stiffness: 0.15`, `Drag: 0.4` (prevents horn/antenna flipping during forward motion).
-    - **Skirt & Coat Groups (6 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.20`, `Stiffness: 0.25`, `Drag: 0.4` (eliminates high-frequency lower-body vibration).
+    - **Skirt front (4 components)**: `Gravity Power 0.20`, `Stiffness 0.25`, `Drag 0.4` — the visible part keeps its bounce.
+    - **SkirtCovered (1 component)**: the 16 side/back skirt chains that are always under the jacket — `Stiffness 0.8`, `Drag 0.7`, `Gravity 0.1`, so they can't swing out through it.
+    - The `CoatSkirt` bones are unused VRoid template leftovers (no vertices are weighted to them); the jacket hem is skinned rigidly to hips/thighs.
+  - **FastSpringBone (`FastSpringBoneActivator`)**: all spring chains run as one Burst-compiled job via UniVRM's `Vrm0XFastSpringboneRuntime` instead of 25 MonoBehaviour updates (LateUpdate 1.03 → 0.31 ms).
+- **Cloth clipping fixes** (`Tools/Character/Apply Cloth Clipping Fix`, `Assets/Editor/ClothClippingFix.cs`):
+  - **Skirt through jacket**: the part of the skirt that the jacket always covers (sides/back, 1161 vertices) is tucked up to 3 cm inward in `Assets/Models/Nino Nakano/ClothFix/Body_ClothFix.asset` (a copy — the imported mesh is untouched). The visible front is unchanged.
+  - **Hands in the jacket (`ArmClothClearance`)**: each frame, ~700 points of the jacket's lower surface are skinned on the CPU; if a hand/finger tip is inside, the upper arm rotates outward just enough (+1.2 cm clearance), easing back when free. Measured: hands inside the jacket 120/120 idle frames (up to 5.2 cm) → 0, running 25/120 → 0.
 - **CharacterController** (on `Player` root):
   - `Height: 1.6` · `Center Y: 0.8` · `Radius: 0.35`
 
@@ -46,6 +52,9 @@ This repository contains the source code for a 3D third-person Unity game featur
     - `Face` SkinnedMeshRenderer: `receiveShadows = false` (completely prevents bangs/hair from casting jagged polygon shadow shards on the face).
     - Eyes (`EyeIris`, `EyeHighlight`, `EyeWhite`): Preserved on `Universal Render Pipeline/Unlit` for maximum luminescence and clarity.
     - Eyebrows (`FaceBrow`): Explicit `renderQueue = 3001` so eyebrows layer cleanly over hair strands.
+- **Anti-aliasing & texture fidelity** (`Tools/Character/Upgrade Render Quality`, `Assets/Editor/RenderQualityUpgrade.cs`):
+  - **MSAA 4x** (`PC_RPAsset`) for geometry and inverted-hull outline edges + **SMAA High** on the camera for cel-shading steps (MSAA was off).
+  - **Character textures**: mipmaps were disabled (textures shimmered/sparkled with distance). Now mipmaps with Kaiser filter, trilinear + 8x anisotropic, **BC7** instead of DXT1/DXT5, alpha coverage preserved for alpha-clipped hair (cutoff 0.5).
 - **Material Backup**:
   - Original VRM URP Unlit materials backed up safely at `Assets/Models/Nino Nakano/Backup_Materials_URP_Unlit/`.
 
@@ -77,7 +86,7 @@ This repository contains the source code for a 3D third-person Unity game featur
 ### 4. Camera System
 - **Wuthering Waves style camera (`ThirdPersonOrbitCamera.cs`)**:
   - Mouse orbit with frame-rate independent sensitivity (`0.12°` per pixel), pitch `-35°..70°`, starts behind the character at `12°`.
-  - Scroll-wheel zoom (`1.6–8 m`, default `4.2 m`); the camera pulls closer when looking up so it never digs into the ground.
+  - Scroll-wheel zoom (`1.6–8 m`, default `4.2 m`, `0.6 m` per notch; works with the Input System's uniform ±1-per-notch scroll and the older ±120 range, and even while the cursor is unlocked); the camera pulls closer when looking up so it never digs into the ground.
   - Tight horizontal follow (`0.05 s`) with a softer vertical follow (`0.18 s`), so jumps and steps don't jolt the view.
   - Auto-recenter: while running sideways the camera swings round behind the character (up to `70°/s`), and pitch eases back to `12°`. Pauses for `0.6 s` after any mouse input and never fights you when running towards the camera.
   - FOV `50°`, widening by `5°` while sprinting.
@@ -101,6 +110,8 @@ Assets/
 │       └── jump.fbx                           # Jump_Takeoff / Jump_Air / Jump_Land
 ├── Editor/
 │   ├── MixamoLocomotionSetup.cs               # Mixamo import (clean T-pose), speed measurement, 24fps capture
+│   ├── ClothClippingFix.cs                    # Skirt tuck mesh, covered-skirt springs, arm clearance setup
+│   ├── RenderQualityUpgrade.cs                # MSAA, texture mips/BC7/aniso, skinned bounds, fast spring bones
 │   ├── RestoreNinoMaterials.cs                # Material & shadow restoration tool
 │   └── PurgeHuTaoAndUpgradeNino.cs            # Asset maintenance utilities
 ├── Models/
@@ -116,14 +127,19 @@ Assets/
     ├── AnimeCharacterController.cs            # Movement and locomotion logic
     ├── ThirdPersonOrbitCamera.cs              # WuWa-style follow camera
     ├── DiscardRootMotion.cs                   # Drops root motion on the character's Animator
-    └── Dev/LocomotionFrameCapture.cs          # Editor-only 24fps capture + foot diagnostics
+    ├── ArmClothClearance.cs                   # Keeps hands out of the jacket
+    ├── FastSpringBoneActivator.cs             # Burst job spring bones for the VRM model
+    └── Dev/                                   # Editor-only diagnostics
+        ├── LocomotionFrameCapture.cs          # 24fps capture + foot diagnostics
+        ├── CharacterCloseupCapture.cs         # Close-up contact sheets (front/side/back)
+        └── ClothClipProbe.cs                  # Measures skirt/hand clipping on the baked mesh
 ```
 
 ## Scene Hierarchy
 
 ```
 Player                          (CharacterController, AnimeCharacterController)
- └── Nino_Model                 (Animator → Nino_LocomotionController, Humanoid, DiscardRootMotion)
+ └── Nino_Model                 (Animator → Nino_LocomotionController, Humanoid, DiscardRootMotion, ArmClothClearance, FastSpringBoneActivator)
       └── [VRM bone hierarchy]
 ```
 
