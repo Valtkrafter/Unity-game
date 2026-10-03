@@ -7,10 +7,15 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(CharacterController))]
 public sealed class AnimeCharacterController : MonoBehaviour
 {
+    // Speeds match the stride of the Mixamo clips on Nino (measured with Tools/Locomotion/2. Measure Natural Clip Speeds)
+    // so the planted foot stays locked to the ground. Change them together with the blend tree thresholds.
     [Header("Locomotion Speeds (m/s)")]
-    [SerializeField] private float walkSpeed = 2.2f;
-    [SerializeField] private float runSpeed = 5.0f;
-    [SerializeField] private float sprintSpeed = 10.0f;
+    [SerializeField] private float walkSpeed = 0.95f;
+    [SerializeField] private float runSpeed = 3.4f;
+    [SerializeField] private float sprintSpeed = 4.6f;
+    // Movement speed and the Animator Speed parameter share one ramped value, so feet stay in sync on starts/stops.
+    [SerializeField] private float acceleration = 9.0f;  // m/s^2 (idle -> run in ~0.4 s)
+    [SerializeField] private float deceleration = 7.0f;  // m/s^2 (run -> idle in ~0.5 s: one or two slowing steps)
 
     [Header("Rotation Tuning")]
     [SerializeField] private float rotationSmoothTime = 0.08f;
@@ -19,6 +24,8 @@ public sealed class AnimeCharacterController : MonoBehaviour
     [Header("Anime Physics & Jump")]
     [SerializeField] private float gravity = -25.0f;
     [SerializeField] private float jumpHeight = 1.8f;
+    [Tooltip("Delay between the jump press and leaving the ground, matching the push-off of the jump animation.")]
+    [SerializeField] private float jumpTakeoffDelay = 0.07f;
     [SerializeField] private float terminalVelocity = -40.0f;
     [SerializeField] private float groundedStickiness = -3.0f;
     [SerializeField] private LayerMask groundLayer = 1; // Default to layer 1
@@ -32,9 +39,20 @@ public sealed class AnimeCharacterController : MonoBehaviour
     private CharacterController controller;
     private Vector3 verticalVelocity;
     private float currentSpeedMagnitude;
+    private Vector3 lastMoveDirection;
+    private float takeoffTimer = -1f; // >= 0 while the push-off animation plays before leaving the ground
 
     public float CurrentSpeed => currentSpeedMagnitude;
+    public bool IsSprinting => currentSpeedMagnitude > runSpeed + 0.1f;
+    private float JumpVelocity => Mathf.Sqrt(jumpHeight * -2.0f * gravity); // v = sqrt(h * -2 * g)
     public bool IsGrounded => controller.isGrounded || Physics.CheckSphere(transform.position + Vector3.up * 0.1f, 0.2f, groundLayer, QueryTriggerInteraction.Ignore);
+
+    // Automation / Testing overrides
+    public static Vector2 InputOverride = Vector2.zero;
+    public static bool UseInputOverride = false;
+    public static bool SprintOverride = false;
+    public static bool WalkOverride = false;
+    public static bool JumpOverride = false; // consumed by the next jump check
 
     private void Awake()
     {
@@ -115,27 +133,34 @@ public sealed class AnimeCharacterController : MonoBehaviour
             }
         }
 
-        currentSpeedMagnitude = targetSpeed;
-        Vector3 horizontalVelocity = moveDirection * targetSpeed;
+        // Accelerate/decelerate instead of snapping, and keep moving along the last direction while
+        // slowing down, so the feet stay in sync with the blend tree during starts and stops.
+        if (moveDirection != Vector3.zero) lastMoveDirection = moveDirection;
+        float rate = targetSpeed > currentSpeedMagnitude ? acceleration : deceleration;
+        currentSpeedMagnitude = Mathf.MoveTowards(currentSpeedMagnitude, targetSpeed, rate * Time.deltaTime);
+        Vector3 horizontalVelocity = lastMoveDirection * currentSpeedMagnitude;
         controller.Move(horizontalVelocity * Time.deltaTime);
     }
 
     private void ApplyGravityAndJump()
     {
-        if (IsGrounded)
+        if (takeoffTimer >= 0f)
         {
-            if (verticalVelocity.y < 0f)
-            {
-                verticalVelocity.y = groundedStickiness;
-            }
+            // The takeoff animation pushes off first; leave the ground when its feet do.
+            takeoffTimer -= Time.deltaTime;
+            if (takeoffTimer < 0f) verticalVelocity.y = JumpVelocity;
+        }
 
-            if (IsJumpTriggered())
+        if (IsGrounded && verticalVelocity.y <= 0f)
+        {
+            verticalVelocity.y = groundedStickiness;
+
+            if (takeoffTimer < 0f && IsJumpTriggered())
             {
-                // v = sqrt(h * -2 * g)
-                verticalVelocity.y = Mathf.Sqrt(jumpHeight * -2.0f * gravity);
+                takeoffTimer = jumpTakeoffDelay;
                 if (animator != null)
                 {
-                    animator.SetTrigger("Jump");
+                    animator.SetTrigger(JumpHash);
                 }
             }
         }
@@ -154,17 +179,23 @@ public sealed class AnimeCharacterController : MonoBehaviour
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int IsGroundedHash = Animator.StringToHash("IsGrounded");
     private static readonly int VerticalVelocityHash = Animator.StringToHash("VerticalVelocity");
+    private static readonly int AirProgressHash = Animator.StringToHash("AirProgress");
+    private static readonly int JumpHash = Animator.StringToHash("Jump");
 
     private void UpdateAnimator()
     {
         if (animator == null) return;
-        animator.SetFloat(SpeedHash, currentSpeedMagnitude, 0.15f, Time.deltaTime);
+        animator.SetFloat(SpeedHash, currentSpeedMagnitude); // already smoothed in HandleMovement
         animator.SetBool(IsGroundedHash, IsGrounded);
         animator.SetFloat(VerticalVelocityHash, verticalVelocity.y);
+        // Air pose follows the physics arc: 0 = just left the ground, 0.5 = apex, 1 = about to land.
+        animator.SetFloat(AirProgressHash, Mathf.InverseLerp(JumpVelocity, -JumpVelocity, verticalVelocity.y));
     }
 
     private Vector2 ReadMoveInput()
     {
+        if (UseInputOverride) return InputOverride.sqrMagnitude > 0.001f ? InputOverride.normalized : Vector2.zero;
+
         float x = 0f;
         float y = 0f;
 
@@ -193,6 +224,13 @@ public sealed class AnimeCharacterController : MonoBehaviour
 
     private bool IsJumpTriggered()
     {
+        if (UseInputOverride)
+        {
+            bool jump = JumpOverride;
+            JumpOverride = false;
+            return jump;
+        }
+
 #if ENABLE_INPUT_SYSTEM
         if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) return true;
 #endif
@@ -204,6 +242,8 @@ public sealed class AnimeCharacterController : MonoBehaviour
 
     private bool IsSprintPressed()
     {
+        if (UseInputOverride) return SprintOverride;
+
 #if ENABLE_INPUT_SYSTEM
         if (Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed) return true;
 #endif
@@ -215,6 +255,8 @@ public sealed class AnimeCharacterController : MonoBehaviour
 
     private bool IsWalkPressed()
     {
+        if (UseInputOverride) return WalkOverride;
+
 #if ENABLE_INPUT_SYSTEM
         if (Keyboard.current != null && Keyboard.current.leftCtrlKey.isPressed) return true;
 #endif

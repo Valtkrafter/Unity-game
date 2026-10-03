@@ -6,15 +6,17 @@ This repository contains the source code for a 3D third-person Unity game featur
 
 ### 1. Character & Movement
 - **Anime Character Controller (`AnimeCharacterController.cs`)**: Handles responsive character movement, aligning the character's forward direction with the camera's planar view.
-  - **Calibrated Movement Speeds**: Walk `2.2 m/s` · Run `5.0 m/s` · Sprint `10.0 m/s` (precisely tuned to eliminate foot sliding).
-  - Smooth animation parameter damping (`0.15s`) using cached parameter hashes (`Speed`, `IsGrounded`, `VerticalVelocity`).
-  - Gravity-based jumping (`jumpHeight: 1.8`, `gravity: -25.0`).
+  - **Stride-Matched Movement Speeds**: Walk `0.95 m/s` · Run `3.4 m/s` · Sprint `4.6 m/s`. These are the natural ground speeds of the Mixamo clips on Nino, measured from the planted foot (`Tools/Locomotion/2. Measure Natural Clip Speeds`), so feet stay locked to the floor (measured planted-foot slip ≈ 0.1–0.2 m/s, previously 3–9 m/s).
+  - **Smooth starts & stops**: acceleration `9 m/s²` (idle → run in ~0.4 s, one walking step into the run) and deceleration `7 m/s²` (run → idle in ~0.5 s, one or two slowing steps). Movement speed and the Animator `Speed` parameter share the same ramped value, so the feet stay in sync with the blend tree.
+  - Cached parameter hashes (`Speed`, `IsGrounded`, `VerticalVelocity`).
+  - Static input overrides (`UseInputOverride`, `InputOverride`, `WalkOverride`, `SprintOverride`, `JumpOverride`) for automated testing.
+  - Gravity-based jumping (`jumpHeight: 1.8`, `gravity: -25.0`) with a `0.07 s` takeoff delay so the body leaves the ground when the push-off animation's feet do. Sets `AirProgress` (0 = takeoff, 0.5 = apex, 1 = landing) from the vertical velocity.
   - Rotation smoothing (`0.08s`).
 - **Character Model — Nino Nakano (VRM)**: Active player avatar imported via UniVRM.
   - Located at `Assets/Models/Nino Nakano/` (VRM source: `5394265126170879566.vrm`).
-  - Instantiated in the scene as `Player > Nino_Model` with local transforms synchronized to clean T-pose (`pos 0,0,0 · rot 0,0,0 · scale 1,1,1`).
+  - Instantiated in the scene as `Player > Nino_Model` at real-world size (~1.65 m, `humanScale 0.96`): `pos 0,-0.02,0 · rot 0,0,0 · scale 1,1,1`. The `-0.02` offset compensates the CharacterController skin width (`0.05`) so the shoe soles sit on the floor (measured from the baked mesh in Play Mode: idle sole at `-0.1 cm`).
   - SkinnedMeshRenderers configured with `Bone4` quality and `Update When Offscreen = true`.
-  - `applyRootMotion = false` — translation is managed entirely by `AnimeCharacterController`.
+  - `applyRootMotion = false` plus `DiscardRootMotion` (handles `OnAnimatorMove`) — translation and height are managed entirely by `AnimeCharacterController`; any unbaked root motion is dropped instead of being written into the pose.
   - **VRM SpringBone Physics Stabilization**:
     - **Hair Groups (17 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.25`, `Stiffness: 0.15`, `Drag: 0.4` (prevents horn/antenna flipping during forward motion).
     - **Skirt & Coat Groups (6 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.20`, `Stiffness: 0.25`, `Drag: 0.4` (eliminates high-frequency lower-body vibration).
@@ -48,32 +50,39 @@ This repository contains the source code for a 3D third-person Unity game featur
   - Original VRM URP Unlit materials backed up safely at `Assets/Models/Nino Nakano/Backup_Materials_URP_Unlit/`.
 
 ### 3. Animation System
-- **Active Locomotion Clips** (`Assets/Animations/`):
-  - **Idle (`X Bot@Female Standing Pose.fbx`)**: Clean, flat-foot neutral stance.
-  - **Walk (`X Bot@Female Walk.fbx`)**: Straightforward stride with centered pelvic translation.
-  - **Run (`X Bot@Running.fbx`)**: Forward running stride with verified knee hinge orientation.
-  - **Jump (`Female Locomotion Pack/jump.fbx`)**: Single-shot jump action.
-- **Humanoid Retargeting & Rig Settings**:
-  - **Toe Bone De-coupling**: `LeftToes` and `RightToes` are unmapped from animation avatar configurations to prevent Mixamo toe-roll rotations from deforming VRM anime shoe meshes.
-  - **Root Transform Rotation**: `bakeIntoPose = true`, `keepOriginalOrientation = false` (Body Orientation — locks pure forward alignment along Z-axis).
-  - **Root Transform Position (Y)**: `bakeIntoPose = true`, `keepOriginalPositionY = true` (Original — locks pelvis height to prevent knee popping).
-  - **Root Transform Position (XZ)**: `bakeIntoPose = true`, `keepOriginalPositionXZ = false` (Center of Mass — absorbs lateral displacement).
-  - **Curve Filtering**: Lateral translation tracks (`RootT.x`) and inverted knee/foot twist artifacts flattened to ensure smooth, natural joint flexion.
-- **Animator Controller** (`Assets/Animations/Nino_LocomotionController.controller`):
+- **Active Locomotion Clips** (`Assets/Animations/`) — the original Mixamo motion, unedited and played at 1x:
+  - **Idle (`Female Locomotion Pack/idle.fbx`)**: 8.3 s breathing idle in the hand-on-hip pose (1–2 cm sway of head, chest and hands). Replaces the single-frame `X Bot@Female Standing Pose`, which is the same pose frozen.
+  - **Walk (`X Bot@Female Walk.fbx`)**: 1.333 s cycle, heel-strike → roll → toe-off.
+  - **Run (`X Bot@Running.fbx`)**: 0.7 s cycle (~17 frames at 24 fps), forefoot strike with a real flight phase.
+  - **Jump (`Female Locomotion Pack/jump.fbx`)**: split into `Jump_Takeoff` (frames 29–37, push-off after the anticipation crouch), `Jump_Air` (37–63) and `Jump_Land` (63–100). `Jump_Air` leaves its vertical motion unbaked so the clip's own 0.27 m hop is dropped and only the physics jump lifts the body. All three use `level +0.04` so the feet sit on the floor.
+- **Humanoid Retargeting (`Assets/Editor/MixamoLocomotionSetup.cs`, `Tools/Locomotion/1. Reimport Mixamo Clips With Clean T-Pose`)**:
+  - **Clean shared reference T-pose**: Mixamo files downloaded without skin have no bind pose, so Unity used each file's first frame as the humanoid reference. That gave tilted legs (~7°) and a different hip height per clip (the crouched run got body scale `0.939` vs `1.054` for idle), which made the run float ~10 cm and bent Nino's legs. All four clips now use one generated T-pose (level hips, vertical spine and legs, horizontal arms, feet forward, hips at standing height `1.054 m`).
+  - **Toes**: not mapped in the clip avatars, so Mixamo toe-roll never deforms the VRM shoe meshes.
+  - **Root Transform Rotation**: baked, Body Orientation. **Position Y**: baked, Original, `level 0` (no offset hacks). **Position XZ**: baked, Center of Mass (jump keeps Original).
+  - No curve edits or "stabilized"/"corrected" clip copies.
+- **Animator Controller** (`Assets/Animations/Nino_LocomotionController.controller`, assigned directly on `Nino_Model`):
   - **Parameters**: `Speed` (Float), `Jump` (Trigger), `SpecialIdle` (Trigger), `VerticalVelocity` (Float), `IsGrounded` (Bool).
-  - **Base Layer Settings**: `IK Pass = false`, `iKOnFeet = false` across all states (prevents hyper-extending knees on phantom ground planes).
-  - **Locomotion Blend Tree** (1D, driven by `Speed`):
-    - `0.0` → `Female Standing Pose` (100% idle at rest)
-    - `2.2` → `Female Walk` (100% walk cadence)
-    - `5.0` → `Running` (100% run cadence)
-  - **Jump State**: Triggered by `Jump` parameter with crossfade exit back to Locomotion.
+  - **Base Layer Settings**: `IK Pass = false`, `iKOnFeet = false`.
+  - **Locomotion Blend Tree** (1D, driven by `Speed`; set by `Tools/Locomotion/3. Apply Speeds To Blend Tree And Scene`):
+    - `0.0` → `Female Standing Pose`
+    - `0.95` → `Female Walk` (1x)
+    - `3.4` → `Running` (1x)
+    - `4.6` → `Running` (1.35x — sprint; a dedicated Mixamo sprint clip is needed for faster sprinting)
+  - **Jump States**: `Locomotion → Jump_Takeoff` (`Jump` trigger, 0.08 s) `→ Jump_Air` (end of takeoff; motion time = `AirProgress`, so the pose follows the physics arc for any height, and walking off a ledge also enters it) `→ Jump_Land` (`IsGrounded` and falling) `→ Locomotion` (after 20% when moving — run out of the landing — or 60% when standing). `Jump_Land → Jump_Takeoff` allows chained jumps.
+  - **Parameters**: `AirProgress` (Float) added.
+- **24 fps Locomotion Capture** (`Tools/Locomotion/4. Capture 24fps Sequence (Play Mode)`, `Assets/Scripts/Dev/LocomotionFrameCapture.cs`, editor-only):
+  - Locks game time to exactly 1/24 s per frame and records idle / walk / run / sprint, start (idle → run), stop (run → idle), standing jump, running jump and a camera strafe from the game camera, a side view and a front view (contact sheets in `Captures/Locomotion_24fps/`, git-ignored). Each phase starts from the arena centre.
+  - `report.txt` logs per frame: ground speed, planted-foot slip, shoe-sole height (lowest baked mesh vertex vs. floor), hip height and knee flexion.
 
 ### 4. Camera System
-- **Third-Person Orbit Camera (`ThirdPersonOrbitCamera.cs`)**:
-  - Orbits smoothly around the player character.
-  - Supports mouse look for pitch and yaw.
-  - Supports zooming in and out using the mouse scroll wheel.
-  - Prevents clipping through geometry by repositioning closer to the player when obstacles block the line of sight.
+- **Wuthering Waves style camera (`ThirdPersonOrbitCamera.cs`)**:
+  - Mouse orbit with frame-rate independent sensitivity (`0.12°` per pixel), pitch `-35°..70°`, starts behind the character at `12°`.
+  - Scroll-wheel zoom (`1.6–8 m`, default `4.2 m`); the camera pulls closer when looking up so it never digs into the ground.
+  - Tight horizontal follow (`0.05 s`) with a softer vertical follow (`0.18 s`), so jumps and steps don't jolt the view.
+  - Auto-recenter: while running sideways the camera swings round behind the character (up to `70°/s`), and pitch eases back to `12°`. Pauses for `0.6 s` after any mouse input and never fights you when running towards the camera.
+  - FOV `50°`, widening by `5°` while sprinting.
+  - Collision: snaps in front of walls instantly, eases back out over `0.25 s`.
+  - Cursor locked in play; hold **Left Alt** to free it, **Esc** unlocks, click relocks.
 
 ### 5. Environment
 - A basic testing arena (`Ground_Arena`) is set up for movement and camera collision testing.
@@ -84,12 +93,14 @@ This repository contains the source code for a 3D third-person Unity game featur
 Assets/
 ├── Animations/
 │   ├── Nino_LocomotionController.controller  # Active locomotion state machine
-│   ├── X Bot@Female Standing Pose.fbx         # Clean neutral idle stance
-│   ├── X Bot@Female Walk.fbx                  # Centered forward walk clip
-│   ├── X Bot@Running.fbx                      # Calibrated forward run clip
-│   └── Female Locomotion Pack/                # Supplementary clips (jump, strafes, turns)
-│       └── jump.fbx
+│   ├── X Bot@Female Standing Pose.fbx         # Single-frame version of the idle pose (not in the blend tree)
+│   ├── X Bot@Female Walk.fbx                  # Walk clip
+│   ├── X Bot@Running.fbx                      # Run clip (also sprint at 1.35x)
+│   └── Female Locomotion Pack/                # Supplementary clips (strafes, turns)
+│       ├── idle.fbx                           # Breathing idle (active)
+│       └── jump.fbx                           # Jump_Takeoff / Jump_Air / Jump_Land
 ├── Editor/
+│   ├── MixamoLocomotionSetup.cs               # Mixamo import (clean T-pose), speed measurement, 24fps capture
 │   ├── RestoreNinoMaterials.cs                # Material & shadow restoration tool
 │   └── PurgeHuTaoAndUpgradeNino.cs            # Asset maintenance utilities
 ├── Models/
@@ -103,14 +114,16 @@ Assets/
 │       └── 5394265126170879566.BlendShapes/
 └── Scripts/
     ├── AnimeCharacterController.cs            # Movement and locomotion logic
-    └── ThirdPersonOrbitCamera.cs              # Orbit camera with collision damping
+    ├── ThirdPersonOrbitCamera.cs              # WuWa-style follow camera
+    ├── DiscardRootMotion.cs                   # Drops root motion on the character's Animator
+    └── Dev/LocomotionFrameCapture.cs          # Editor-only 24fps capture + foot diagnostics
 ```
 
 ## Scene Hierarchy
 
 ```
 Player                          (CharacterController, AnimeCharacterController)
- └── Nino_Model                 (Animator → Nino_LocomotionController, Humanoid)
+ └── Nino_Model                 (Animator → Nino_LocomotionController, Humanoid, DiscardRootMotion)
       └── [VRM bone hierarchy]
 ```
 
@@ -125,6 +138,8 @@ Player                          (CharacterController, AnimeCharacterController)
 | Space | Jump |
 | Mouse | Camera orbit (pitch / yaw) |
 | Scroll Wheel | Camera zoom |
+| Left Alt (hold) | Free the cursor |
+| Esc / Left Click | Unlock / relock the cursor |
 
 ---
 
