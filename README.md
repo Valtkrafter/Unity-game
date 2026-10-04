@@ -6,7 +6,7 @@ This repository contains the source code for a 3D third-person Unity game featur
 
 ### 1. Character & Movement
 - **Anime Character Controller (`AnimeCharacterController.cs`)**: Handles responsive character movement, aligning the character's forward direction with the camera's planar view.
-  - **Stride-Matched Movement Speeds**: Walk `1.12 m/s` · Run `3.6 m/s` · Sprint `4.9 m/s`. These are the natural ground speeds of Nino's walk/run clips, measured from the standing foot (`Tools/Locomotion/2. Measure Natural Clip Speeds`), so her feet stay locked to the floor (measured standing-foot slip ≈ 0.06–0.2 m/s).
+  - **Stride-Matched Movement Speeds**: Walk `0.84 m/s` · Run `2.3 m/s` · Sprint `3.1 m/s`. These are the natural ground speeds of the Unity-chan walk/run clips on Nino, measured from the standing foot (`Tools/Locomotion/2. Measure Natural Clip Speeds`), so her feet stay locked to the floor.
   - **Idle flourish**: after `8 s` standing still (then every `20 s`), sets the `SpecialIdle` trigger (Nino's model pose).
   - **Smooth starts & stops**: acceleration `9 m/s²` (idle → run in ~0.4 s, one walking step into the run) and deceleration `7 m/s²` (run → idle in ~0.5 s, one or two slowing steps). Movement speed and the Animator `Speed` parameter share the same ramped value, so the feet stay in sync with the blend tree.
   - Cached parameter hashes (`Speed`, `IsGrounded`, `VerticalVelocity`).
@@ -64,15 +64,13 @@ This repository contains the source code for a 3D third-person Unity game featur
   - Original VRM URP Unlit materials backed up safely at `Assets/Models/Nino Nakano/Backup_Materials_URP_Unlit/`.
 
 ### 3. Animation System
-- **Nino's locomotion** (`Assets/Animations/Nino/`): anime motion from MMD, converted and restyled for Nino (the Mixamo walk/run looked generic):
-  - **Walk (`Walk_Nino.anim`)**: tweekcrystal's feminine *Normal walk*. Her feet step on one line with a light heel kick, and the upper body twists against the hips. Nino styling on top: heel kick 25% lower, hip sway ×1.5, chest out 4°, chin up 3°. 1.0 s cycle, `1.12 m/s`.
-  - **Run (`Run_Nino.anim`)**: tweekcrystal's *Female run*, with a forward lean and full arm swing. Strides are scaled to 90% (it was made on a taller model), chin up 2°. 0.53 s cycle, `3.6 m/s`; sprint plays it at 1.35x (`4.9 m/s`).
-  - Both play in place (travel removed, sway and bob kept). The standing foot is planted on Nino's own shoes, and both loop seamlessly (the converter picks the cycle with zero pose error).
-  - Measured in Play Mode (`Tools/Locomotion/4`):
-    - Walk: standing-foot slide averages `0.06 m/s`; shoe sole `-0.4..0.7 cm`.
-    - Run: sole `>= 0 cm`; slide `0.2 m/s`.
-    - Cloth audit, walk: clean (2 verts / 0.3 cm).
-    - Cloth audit, run: the higher knee lift pushes the front of the thigh up to ~4 cm into the skirt for a few frames. The jacket hides it from the game camera.
+- **Nino's locomotion: Unity-chan** (`Assets/ThirdParty/UnityChan/Animations/`, from the free *Unity-Chan! Model* 1.2.2 on the Asset Store, Unity Technologies Japan, Unity-Chan License): Unity humanoid FBX clips that retarget directly onto Nino, with no conversion.
+  - **Walk (`unitychan_WALK00_F`)**: natural, light anime walk. 1.3 s cycle, `0.84 m/s`.
+  - **Run (`unitychan_RUN00_F`)**: light anime run with relaxed arm swing. 0.8 s cycle, `2.3 m/s`; sprint plays it at 1.35x (`3.1 m/s`).
+  - Only the 26 animation FBX files were extracted from the package (with their original .meta); none of its old scripts, shaders or scenes are in the project. Other clips ready to use: idles `WAIT00`–`WAIT04` (calm stance, stretch, look around, peek, twirl), `JUMP00/01`, `WIN00`, `LOSE00`, `DAMAGED00/01`, `SLIDE00`, `UMATOBI00`, side/back walks and runs.
+  - Import settings (written by `Tools/Locomotion/3`): loop, root rotation/Y/XZ baked (Original), per-clip height offset so the soles touch the floor in the scene (walk `0.035`, run `-0.01`).
+  - Measured in Play Mode (`Tools/Locomotion/4`): walk shoe sole `-1.1..0.7 cm` (median `0.0`), standing-foot slide avg `0.12 m/s`; run sole `>= -0.6 cm`.
+- **Why not the MMD clips**: the MMD walk/run converted on 2026-10-04 (`Assets/Animations/Nino/Walk_Nino`, `Run_Nino`, plus `Candidates/`) passed every technical check but looked wrong in play: the run had arms flying out at shoulder height, very high knees and lunge-length strides; the walk looked crouched with bent knees. They stay in the project for reference and are not used. The conversion pipeline (`Tools/AnimConvert`) is still the route for `.vmd`/`.vrma` sources such as the VRoid gestures.
 - **Idle**: `Female Locomotion Pack/idle.fbx` (Mixamo, 8.3 s breathing idle in a hand-on-hip pose).
   - **Idle flourish (`SpecialIdle` state)**: once Nino has stood still for `8 s` (then every `20 s`), `AnimeCharacterController` fires the `SpecialIdle` trigger and she strikes the VRoid *Model pose*: hand on hip, then she touches her hair. Moving or jumping cuts it short.
 - **Gestures** (`Assets/Animations/Nino/Gestures/`, VRoid Project motion pack, ready for the interaction system): `VRoid_Greeting`, `VRoid_PeaceSign`, `VRoid_ModelPose`, `VRoid_ShowFullBody`, `VRoid_Spin`, `VRoid_Squat`, `VRoid_Shoot`.
@@ -109,11 +107,11 @@ This repository contains the source code for a 3D third-person Unity game featur
 - **Animator Controller** (`Assets/Animations/Nino_LocomotionController.controller`, assigned directly on `Nino_Model`, rebuilt by `Tools/Locomotion/3. Apply Speeds To Blend Tree And Scene`):
   - **Parameters**: `Speed` (Float), `Jump` (Trigger), `SpecialIdle` (Trigger), `VerticalVelocity` (Float), `IsGrounded` (Bool), `AirProgress` (Float).
   - **Base Layer Settings**: `IK Pass = false`, `iKOnFeet = false`.
-  - **Locomotion Blend Tree** (1D, driven by `Speed`). Tool 3 measures each clip's standing-foot speed and writes the thresholds and the controller speeds together. The run falls back to its authored `3.6 m/s`, because it lands flat for only ~2 frames before pushing off the toe. Thresholds:
+  - **Locomotion Blend Tree** (1D, driven by `Speed`). Tool 3 configures the clips' import settings, measures each clip's standing-foot speed and writes the thresholds and the controller speeds together. Thresholds:
     - `0.0` → breathing idle
-    - `1.12` → `Walk_Nino` (1x)
-    - `3.6` → `Run_Nino` (1x)
-    - `4.9` → `Run_Nino` (1.35x, sprint)
+    - `0.84` → `unitychan_WALK00_F` (1x)
+    - `2.3` → `unitychan_RUN00_F` (1x)
+    - `3.1` → `unitychan_RUN00_F` (1.35x, sprint)
   - **Jump States**:
     - `Locomotion → Jump_Takeoff`: on the `Jump` trigger, 0.08 s.
     - `Jump_Takeoff → Jump_Air`: at the end of takeoff. Motion time = `AirProgress`, so the pose follows the physics arc for any height; walking off a ledge also enters it.
@@ -136,7 +134,8 @@ This repository contains the source code for a 3D third-person Unity game featur
   - Drives the same movement phases at a locked 60 fps. On every frame, after the spring bones, it measures how many vertices of an inner layer are outside the layer that covers them: skin through skirt, skirt through jacket, skin through jacket. It reports the depth and *where* (height × angle around the hips).
   - Writes a contact sheet per phase (git-ignored `Captures/ClothAudit/`). Wide views: game-camera direction, the same with the jacket hidden, from behind at ground level, and from the side. Close-ups at hip height: game direction, front-left, front-right and behind.
 - **Credits**:
-  - Walk/run cycles: **tweekcrystal** (DeviantArt, "Various Walk Cycles").
+  - Walk/run: **Unity-chan** © Unity Technologies Japan / UCL ("Unity-Chan! Model", Asset Store).
+  - MMD candidate walk/run cycles: **tweekcrystal** (DeviantArt, "Various Walk Cycles").
   - Walking motion: **Mahlazer** (LearnMMD).
   - Gestures: **Animation credits to pixiv Inc.'s VRoid Project** (VRMA_MotionPack).
 
@@ -160,8 +159,7 @@ Assets/
 ├── Animations/
 │   ├── Nino_LocomotionController.controller  # Active locomotion state machine
 │   ├── Nino/                                  # Generated by Tools/AnimConvert + HumanoidClipBaker
-│   │   ├── Walk_Nino.anim                     # Walk (MMD Normal walk, Nino-styled)
-│   │   ├── Run_Nino.anim                      # Run (MMD Female run), also sprint at 1.35x
+│   │   ├── Walk_Nino.anim, Run_Nino.anim      # MMD walk/run (not used, see Animation System)
 │   │   └── Gestures/                          # VRoid gestures (ModelPose = idle flourish)
 │   ├── Candidates/                            # Other converted walks/runs, for comparison only
 │   ├── X Bot@Female Standing Pose.fbx         # Single-frame version of the idle pose (not in the blend tree)
@@ -170,6 +168,8 @@ Assets/
 │   └── Female Locomotion Pack/                # Supplementary clips (strafes, turns)
 │       ├── idle.fbx                           # Breathing idle (active)
 │       └── jump.fbx                           # Jump_Takeoff / Jump_Air / Jump_Land
+├── ThirdParty/
+│   └── UnityChan/Animations/                  # Unity-chan animation FBXs (walk/run in use, idles/jumps/etc.)
 ├── Editor/
 │   ├── MixamoLocomotionSetup.cs               # Mixamo import (clean T-pose), speed measurement, controller build, 24fps capture
 │   ├── HumanoidClipBaker.cs                   # Pose streams (Tools/AnimConvert) -> humanoid clips

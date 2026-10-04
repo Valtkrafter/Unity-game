@@ -482,9 +482,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 464fd2922b7b5584981de97636d35fed, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AnimeCharacterController
-  walkSpeed: 1.12
-  runSpeed: 3.6
-  sprintSpeed: 4.9
+  walkSpeed: 0.84
+  runSpeed: 2.3
+  sprintSpeed: 3.1
   acceleration: 9
   deceleration: 7
   rotationSmoothTime: 0.08

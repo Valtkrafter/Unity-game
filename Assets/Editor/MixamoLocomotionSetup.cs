@@ -23,15 +23,19 @@ public static class MixamoLocomotionSetup
     private const string BreathingIdlePath = "Assets/Animations/Female Locomotion Pack/idle.fbx";
     private const string WalkPath = "Assets/Animations/X Bot@Female Walk.fbx";
     private const string RunPath = "Assets/Animations/X Bot@Running.fbx";
-    // Clips the blend tree actually uses: Nino-styled walk/run converted from MMD motion (Tools/AnimConvert).
-    private const string LocoWalkPath = "Assets/Animations/Nino/Walk_Nino.anim";
-    private const string LocoRunPath = "Assets/Animations/Nino/Run_Nino.anim";
-    // The MMD run lands flat for ~2 frames and then pushes off the toe, too briefly for the planted-foot measurement;
-    // this is the speed its IK foot targets travel at (stationary on the ground), see Tools/AnimConvert/vmd2clip.py.
-    private const float RunAuthoredSpeed = 3.6f;
+    // Clips the blend tree actually uses: Unity-chan's walk/run (Unity-Chan! Model 1.2.2, humanoid FBX, no conversion).
+    private const string LocoWalkPath = "Assets/ThirdParty/UnityChan/Animations/unitychan_WALK00_F.fbx";
+    private const string LocoRunPath = "Assets/ThirdParty/UnityChan/Animations/unitychan_RUN00_F.fbx";
+    // Root height offset per clip (importer "Offset", positive = lower), measured in Play Mode with
+    // Tools/Locomotion/4 so the shoe soles touch the floor: with 0 the walk floated ~3 cm and the run sank ~1.6 cm
+    // (the model origin sits 3 cm above the floor in the scene and the clips carry Unity-chan's own foot height).
+    private static readonly Dictionary<string, float> LocoHeightOffset = new Dictionary<string, float>
+    {
+        { LocoWalkPath, 0.035f },
+        { LocoRunPath, -0.01f },
+    };
     // Idle flourish (SpecialIdle): VRoid "Model pose" - hand on hip, touches her hair.
     private const string IdleFlourishPath = "Assets/Animations/Nino/Gestures/VRoid_ModelPose.anim";
-    private const int MinStanceSamples = 30;
     private const string JumpPath = "Assets/Animations/Female Locomotion Pack/jump.fbx";
     private const string ReferenceRigPath = "Assets/Animations/Female Locomotion Pack/idle.fbx"; // bone mapping source
     private const string ControllerPath = "Assets/Animations/Nino_LocomotionController.controller";
@@ -102,6 +106,7 @@ public static class MixamoLocomotionSetup
     public static string ApplyToControllerAndScene()
     {
         var log = new StringBuilder();
+        ConfigureLocomotionClips(log);
         log.Append(MeasureSpeeds(out float walk, out float run));
         walk = Mathf.Round(walk * 100f) / 100f;
         run = Mathf.Round(run * 10f) / 10f;
@@ -238,6 +243,34 @@ public static class MixamoLocomotionSetup
         Link(flourish, locomotion, 0.6f, exitTime: 0.92f);
         Link(flourish, locomotion, 0.25f).AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
         Link(flourish, takeoff, 0.08f).AddCondition(AnimatorConditionMode.If, 0f, "Jump");
+    }
+
+    /// <summary>
+    /// Walk/run import settings: looping, everything baked into the pose relative to the original root (the clips are
+    /// in place), lowered by LocoHeightOffset so the soles touch the floor in the scene.
+    /// </summary>
+    private static void ConfigureLocomotionClips(StringBuilder log)
+    {
+        foreach (var path in new[] { LocoWalkPath, LocoRunPath })
+        {
+            var importer = (ModelImporter)AssetImporter.GetAtPath(path);
+            var clips = importer.clipAnimations.Length > 0 ? importer.clipAnimations : importer.defaultClipAnimations;
+            foreach (var c in clips)
+            {
+                c.loopTime = true;
+                c.lockRootRotation = true;
+                c.keepOriginalOrientation = true;
+                c.lockRootHeightY = true;
+                c.keepOriginalPositionY = true;
+                c.lockRootPositionXZ = true;
+                c.keepOriginalPositionXZ = true;
+                c.heightFromFeet = false;
+                c.heightOffset = LocoHeightOffset[path];
+            }
+            importer.clipAnimations = clips;
+            importer.SaveAndReimport();
+            log.AppendLine($"{System.IO.Path.GetFileName(path)}: loop, root baked (Original), height offset {LocoHeightOffset[path]}");
+        }
     }
 
     private static ChildMotion Child(Motion motion, float threshold, float timeScale) =>
@@ -431,12 +464,7 @@ public static class MixamoLocomotionSetup
             log.AppendLine($"Nino rest: ankleY={ankleRestY:F3} toeY={toeRestY:F3} (contact heights below are relative to these; 0 = touching ground)");
             Measure(animator, Clip(IdlePath), ankleRestY, toeRestY, log, out _);
             walkSpeed = Measure(animator, Clip(LocoWalkPath), ankleRestY, toeRestY, log, out _);
-            runSpeed = Measure(animator, Clip(LocoRunPath), ankleRestY, toeRestY, log, out int runSamples);
-            if (runSamples < MinStanceSamples)
-            {
-                runSpeed = RunAuthoredSpeed;
-                log.AppendLine($"Run: only {runSamples} stance samples, using its authored speed {RunAuthoredSpeed} m/s");
-            }
+            runSpeed = Measure(animator, Clip(LocoRunPath), ankleRestY, toeRestY, log, out _);
         }
         finally
         {

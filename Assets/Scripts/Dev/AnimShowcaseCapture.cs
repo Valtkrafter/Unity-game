@@ -10,8 +10,9 @@ using UnityEngine.Playables;
 /// <summary>
 /// Editor-only Play Mode capture for comparing animation clips on the real in-game Nino (spring bones, jacket cloth,
 /// toon shading). Each clip is played directly through a PlayableGraph while the model is moved at the clip's
-/// authored ground speed, so the feet don't slide and the motion looks exactly as authored. Two tracking views (front 3/4 and side) are written per frame as
-/// PNGs into outDir/clipName/, ready to be turned into GIFs (Tools/AnimConvert/make_gifs.py).
+/// authored ground speed, so the feet don't slide and the motion looks exactly as authored. Three tracking views (front 3/4,
+/// side, and the gameplay view from behind) are written per frame as
+/// JPGs into outDir/clipName/, ready to be turned into GIFs (Tools/AnimConvert/make_gifs.py).
 ///
 /// Usage (Play Mode): AnimShowcaseCapture.Begin(outDir, "Assets/...anim|seconds|fps|groundSpeed", ...); poll Done.
 /// </summary>
@@ -22,6 +23,7 @@ public sealed class AnimShowcaseCapture : MonoBehaviour
 
     private const int CellW = 360, CellH = 480;
     private const float SettleSeconds = 1.0f;
+    private static readonly string[] Views = { "front", "side", "game" };
 
     private struct Entry { public string Path; public float Seconds; public int Fps; public float Speed; }
 
@@ -103,12 +105,21 @@ public sealed class AnimShowcaseCapture : MonoBehaviour
                 smoothFocus = i <= -settle + 1 ? focus : Vector3.Lerp(smoothFocus, focus, 0.5f);
                 if (i < 0) continue;
                 if (i == 0) start = modelT.position;
-                for (int view = 0; view < 2; view++)
+                for (int view = 0; view < Views.Length; view++)
                 {
                     Vector3 right = Vector3.Cross(Vector3.up, facing);
-                    Vector3 viewDir = view == 0 ? (facing * 0.8f - right * 0.6f).normalized : right;
-                    cam.transform.position = smoothFocus + viewDir * 3.6f + Vector3.up * 0.15f;
-                    cam.transform.LookAt(smoothFocus);
+                    if (view == 2)
+                    {
+                        // Gameplay view: behind and above like ThirdPersonOrbitCamera (12 deg pitch, ~4.2 m).
+                        cam.transform.position = smoothFocus - facing * 4.1f + Vector3.up * 1.05f;
+                        cam.transform.LookAt(smoothFocus + Vector3.up * 0.25f);
+                    }
+                    else
+                    {
+                        Vector3 viewDir = view == 0 ? (facing * 0.8f - right * 0.6f).normalized : right;
+                        cam.transform.position = smoothFocus + viewDir * 3.6f + Vector3.up * 0.15f;
+                        cam.transform.LookAt(smoothFocus);
+                    }
                     cam.targetTexture = rt;
                     cam.Render();
                     cam.targetTexture = null;
@@ -116,7 +127,7 @@ public sealed class AnimShowcaseCapture : MonoBehaviour
                     read.ReadPixels(new Rect(0, 0, CellW, CellH), 0, 0);
                     read.Apply();
                     RenderTexture.active = null;
-                    File.WriteAllBytes(Path.Combine(dir, $"{(view == 0 ? "front" : "side")}_{i:D4}.jpg"), read.EncodeToJPG(92));
+                    File.WriteAllBytes(Path.Combine(dir, $"{Views[view]}_{i:D4}.jpg"), read.EncodeToJPG(92));
                 }
             }
             Vector3 travel = modelT.position - start; travel.y = 0f;
