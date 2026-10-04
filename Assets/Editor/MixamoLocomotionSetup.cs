@@ -23,6 +23,15 @@ public static class MixamoLocomotionSetup
     private const string BreathingIdlePath = "Assets/Animations/Female Locomotion Pack/idle.fbx";
     private const string WalkPath = "Assets/Animations/X Bot@Female Walk.fbx";
     private const string RunPath = "Assets/Animations/X Bot@Running.fbx";
+    // Clips the blend tree actually uses: Nino-styled walk/run converted from MMD motion (Tools/AnimConvert).
+    private const string LocoWalkPath = "Assets/Animations/Nino/Walk_Nino.anim";
+    private const string LocoRunPath = "Assets/Animations/Nino/Run_Nino.anim";
+    // The MMD run lands flat for ~2 frames and then pushes off the toe, too briefly for the planted-foot measurement;
+    // this is the speed its IK foot targets travel at (stationary on the ground), see Tools/AnimConvert/vmd2clip.py.
+    private const float RunAuthoredSpeed = 3.6f;
+    // Idle flourish (SpecialIdle): VRoid "Model pose" - hand on hip, touches her hair.
+    private const string IdleFlourishPath = "Assets/Animations/Nino/Gestures/VRoid_ModelPose.anim";
+    private const int MinStanceSamples = 30;
     private const string JumpPath = "Assets/Animations/Female Locomotion Pack/jump.fbx";
     private const string ReferenceRigPath = "Assets/Animations/Female Locomotion Pack/idle.fbx"; // bone mapping source
     private const string ControllerPath = "Assets/Animations/Nino_LocomotionController.controller";
@@ -107,18 +116,20 @@ public static class MixamoLocomotionSetup
         tree.children = new[]
         {
             Child(Clip(BreathingIdlePath), 0f, 1f), // same pose as the standing pose, but alive (breathing sway)
-            Child(Clip(WalkPath), walk, 1f),
-            Child(Clip(RunPath), run, 1f),
-            Child(Clip(RunPath), sprint, SprintPlaybackRate),
+            Child(Clip(LocoWalkPath), walk, 1f),
+            Child(Clip(LocoRunPath), run, 1f),
+            Child(Clip(LocoRunPath), sprint, SprintPlaybackRate),
         };
         locomotion.speed = 1f;
         locomotion.iKOnFeet = false;
         BuildJumpStates(controller, locomotion);
+        BuildSpecialIdle(controller, locomotion);
         EditorUtility.SetDirty(tree);
         EditorUtility.SetDirty(controller);
         AssetDatabase.SaveAssets();
         log.AppendLine($"Blend tree: idle 0 | walk {walk} | run {run} | sprint {sprint} (run x{SprintPlaybackRate})");
         log.AppendLine("Jump: Locomotion -> Jump_Takeoff -> Jump_Air (time = AirProgress) -> Jump_Land -> Locomotion");
+        log.AppendLine("SpecialIdle: Locomotion -> SpecialIdle (VRoid_ModelPose) -> Locomotion");
 
         var player = GameObject.Find("Player");
         if (player != null)
@@ -196,6 +207,37 @@ public static class MixamoLocomotionSetup
         // Landed while moving: run out of the landing early. Standing: let the crouch recover first.
         Link(land, locomotion, 0.2f, exitTime: 0.2f).AddCondition(AnimatorConditionMode.Greater, 0.5f, "Speed");
         Link(land, locomotion, 0.25f, exitTime: 0.6f);
+    }
+
+    /// <summary>
+    /// SpecialIdle trigger (set by AnimeCharacterController after standing still) plays the idle flourish once;
+    /// moving or jumping cuts it short.
+    /// </summary>
+    private static void BuildSpecialIdle(AnimatorController controller, AnimatorState locomotion)
+    {
+        var sm = controller.layers[0].stateMachine;
+        var takeoff = sm.states.Select(s => s.state).First(s => s.name == "Jump_Takeoff");
+        var flourish = sm.AddState("SpecialIdle", new Vector3(260f, 220f));
+        flourish.motion = Clip(IdleFlourishPath);
+        flourish.writeDefaultValues = true;
+        flourish.iKOnFeet = false;
+
+        AnimatorStateTransition Link(AnimatorState from, AnimatorState to, float duration, float? exitTime = null)
+        {
+            var t = from.AddTransition(to);
+            t.hasFixedDuration = true;
+            t.duration = duration;
+            t.hasExitTime = exitTime.HasValue;
+            t.exitTime = exitTime ?? 0f;
+            return t;
+        }
+
+        var enter = Link(locomotion, flourish, 0.45f);
+        enter.AddCondition(AnimatorConditionMode.If, 0f, "SpecialIdle");
+        enter.AddCondition(AnimatorConditionMode.Less, 0.05f, "Speed");
+        Link(flourish, locomotion, 0.6f, exitTime: 0.92f);
+        Link(flourish, locomotion, 0.25f).AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
+        Link(flourish, takeoff, 0.08f).AddCondition(AnimatorConditionMode.If, 0f, "Jump");
     }
 
     private static ChildMotion Child(Motion motion, float threshold, float timeScale) =>
@@ -387,9 +429,14 @@ public static class MixamoLocomotionSetup
             Transform toes = animator.GetBoneTransform(HumanBodyBones.LeftToes);
             float toeRestY = toes != null ? toes.position.y : 0f;
             log.AppendLine($"Nino rest: ankleY={ankleRestY:F3} toeY={toeRestY:F3} (contact heights below are relative to these; 0 = touching ground)");
-            Measure(animator, Clip(IdlePath), ankleRestY, toeRestY, log);
-            walkSpeed = Measure(animator, Clip(WalkPath), ankleRestY, toeRestY, log);
-            runSpeed = Measure(animator, Clip(RunPath), ankleRestY, toeRestY, log);
+            Measure(animator, Clip(IdlePath), ankleRestY, toeRestY, log, out _);
+            walkSpeed = Measure(animator, Clip(LocoWalkPath), ankleRestY, toeRestY, log, out _);
+            runSpeed = Measure(animator, Clip(LocoRunPath), ankleRestY, toeRestY, log, out int runSamples);
+            if (runSamples < MinStanceSamples)
+            {
+                runSpeed = RunAuthoredSpeed;
+                log.AppendLine($"Run: only {runSamples} stance samples, using its authored speed {RunAuthoredSpeed} m/s");
+            }
         }
         finally
         {
@@ -398,7 +445,7 @@ public static class MixamoLocomotionSetup
         return log.ToString();
     }
 
-    private static float Measure(Animator animator, AnimationClip clip, float ankleRestY, float toeRestY, StringBuilder log)
+    private static float Measure(Animator animator, AnimationClip clip, float ankleRestY, float toeRestY, StringBuilder log, out int stanceSamples)
     {
         const int samplesPerSecond = 240;
         int n = Mathf.RoundToInt(clip.length * samplesPerSecond);
@@ -431,6 +478,7 @@ public static class MixamoLocomotionSetup
             }
         }
         speeds.Sort();
+        stanceSamples = speeds.Count;
         float median = speeds.Count > 0 ? speeds[speeds.Count / 2] : 0f;
         log.AppendLine($"{clip.name}: length={clip.length:F3}s cycle={1f / clip.length:F2}Hz stanceSamples={speeds.Count} " +
                        $"footGroundSpeed median={median:F2} m/s (p25={Pct(speeds, 0.25f):F2} p75={Pct(speeds, 0.75f):F2}) lowestContact={minY:F3} m");

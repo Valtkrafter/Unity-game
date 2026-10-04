@@ -7,8 +7,9 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(CharacterController))]
 public sealed class AnimeCharacterController : MonoBehaviour
 {
-    // Speeds match the stride of the Mixamo clips on Nino (measured with Tools/Locomotion/2. Measure Natural Clip Speeds)
+    // Speeds match the stride of Nino's walk/run clips (measured with Tools/Locomotion/2. Measure Natural Clip Speeds)
     // so the planted foot stays locked to the ground. Change them together with the blend tree thresholds.
+    // Tools/Locomotion/3 writes both.
     [Header("Locomotion Speeds (m/s)")]
     [SerializeField] private float walkSpeed = 0.95f;
     [SerializeField] private float runSpeed = 3.4f;
@@ -29,6 +30,13 @@ public sealed class AnimeCharacterController : MonoBehaviour
     [SerializeField] private float terminalVelocity = -40.0f;
     [SerializeField] private float groundedStickiness = -3.0f;
     [SerializeField] private LayerMask groundLayer = 1; // Default to layer 1
+
+    [Header("Idle Flourish")]
+    [Tooltip("Seconds standing still before Nino strikes her model pose (SpecialIdle).")]
+    [SerializeField] private float idleFlourishDelay = 8f;
+    [Tooltip("Seconds between flourishes while she keeps standing.")]
+    [SerializeField] private float idleFlourishRepeat = 20f;
+    private float idleTimer;
 
     [Header("Camera Reference")]
     [SerializeField] private ThirdPersonOrbitCamera orbitCamera;
@@ -181,6 +189,7 @@ public sealed class AnimeCharacterController : MonoBehaviour
     private static readonly int VerticalVelocityHash = Animator.StringToHash("VerticalVelocity");
     private static readonly int AirProgressHash = Animator.StringToHash("AirProgress");
     private static readonly int JumpHash = Animator.StringToHash("Jump");
+    private static readonly int SpecialIdleHash = Animator.StringToHash("SpecialIdle");
 
     private void UpdateAnimator()
     {
@@ -190,6 +199,18 @@ public sealed class AnimeCharacterController : MonoBehaviour
         animator.SetFloat(VerticalVelocityHash, verticalVelocity.y);
         // Air pose follows the physics arc: 0 = just left the ground, 0.5 = apex, 1 = about to land.
         animator.SetFloat(AirProgressHash, Mathf.InverseLerp(JumpVelocity, -JumpVelocity, verticalVelocity.y));
+
+        bool standing = currentSpeedMagnitude < 0.05f && takeoffTimer < 0f && IsGrounded;
+        if (!standing)
+        {
+            idleTimer = 0f;
+            animator.ResetTrigger(SpecialIdleHash);
+        }
+        else if ((idleTimer += Time.deltaTime) >= idleFlourishDelay)
+        {
+            animator.SetTrigger(SpecialIdleHash);
+            idleTimer = idleFlourishDelay - idleFlourishRepeat;
+        }
     }
 
     private Vector2 ReadMoveInput()
