@@ -20,12 +20,15 @@ This repository contains the source code for a 3D third-person Unity game featur
   - **VRM SpringBone Physics Stabilization**:
     - **Hair Groups (17 components)**: `Gravity Dir (0, -1, 0)`, `Power: 0.25`, `Stiffness: 0.15`, `Drag: 0.4` (prevents horn/antenna flipping during forward motion).
     - **Skirt front (4 components)**: `Gravity Power 0.20`, `Stiffness 0.25`, `Drag 0.4` — the visible part keeps its bounce.
-    - **SkirtCovered (1 component)**: the 16 side/back skirt chains that are always under the jacket — `Stiffness 0.8`, `Drag 0.7`, `Gravity 0.1`, so they can't swing out through it.
-    - The `CoatSkirt` bones are unused VRoid template leftovers (no vertices are weighted to them); the jacket hem is skinned rigidly to hips/thighs.
+    - **SkirtCovered (1 component)**: the 16 side/back skirt chains that are usually under the jacket — `Stiffness 0.8`, `Drag 0.7`, `Gravity 0.1`.
+    - The `CoatSkirt` bones are unused VRoid template leftovers (no vertices are weighted to them); the jacket hem has its own physics (`JacketHemCloth`, below).
   - **FastSpringBone (`FastSpringBoneActivator`)**: all spring chains run as one Burst-compiled job via UniVRM's `Vrm0XFastSpringboneRuntime` instead of 25 MonoBehaviour updates (LateUpdate 1.03 → 0.31 ms).
-- **Cloth clipping fixes** (`Tools/Character/Apply Cloth Clipping Fix`, `Assets/Editor/ClothClippingFix.cs`):
-  - **Skirt through jacket**: the part of the skirt that the jacket always covers (sides/back, 1161 vertices) is tucked up to 3 cm inward in `Assets/Models/Nino Nakano/ClothFix/Body_ClothFix.asset` (a copy — the imported mesh is untouched). The visible front is unchanged.
+- **Cloth** (`Tools/Character/Apply Cloth Clipping Fix`, `Assets/Editor/ClothClippingFix.cs`). Rebuilt from the imported mesh on every run into `Assets/Models/Nino Nakano/ClothFix/` (mesh and texture copies; the imported model is untouched):
+  - **Jacket hem physics (`JacketHemCloth`)**: the jacket's lower part hangs from 12 chains × 3 segments placed on the jacket's surface around the hips (`J_Sec_JacketHem_*`, 292 vertices re-weighted). Simulated after the VRM spring bones like a spring bone (stiffness `1.2`, drag `0.3`, gravity `0.25`), but only `35%` of her own movement is felt as inertia, so it sways back a little when running and lifts a little in jumps instead of flying up like an umbrella; swing limit `40°`, `10°` sideways around the body. Every frame it collides with the skirt (564 skirt points skinned on the CPU and compared with a map of the jacket's rest surface, so the panel that is over a point *now* makes way) and with the thighs (tapered capsules `8.5 → 4.9 cm`). ~0.3 ms per frame in the editor.
+  - **Skirt fitted to the body**: the skirt keeps its imported shape (an earlier 3 cm "tuck" of its hidden part pushed it into her hips, so her bottom showed through as soon as the jacket moved). Spring-bone influence above each skirt bone's pivot fades out (those points moved into her bottom when the skirt swung out behind a leg), and where the skirt fits tightly its other weights follow the skin under it. The lower skirt still swings on its springs.
+  - **Skirt texture cut-outs**: both skirt layers had holes under the front band and on the sides. The band didn't cover its hole exactly (black zigzag across the front of the skirt) and the side holes showed when the jacket moved. Filled wherever the band doesn't cover the skirt (`ClothFix/_17_ClothFix.png`, `_19_ClothFix.png`; the band's soft edge recoloured in `_18_ClothFix.png`).
   - **Hands in the jacket (`ArmClothClearance`)**: each frame, ~700 points of the jacket's lower surface are skinned on the CPU; if a hand/finger tip is inside, the upper arm rotates outward just enough (+1.2 cm clearance), easing back when free. Measured: hands inside the jacket 120/120 idle frames (up to 5.2 cm) → 0, running 25/120 → 0.
+  - **Measured** with `ClothLayerAudit` (every frame at 60 fps of idle, walk, run, sprint, start, stop, 180° turn, standing and running jump): legs through the jacket `0` in every phase (running jump before: 23 vertices per frame, up to 5.8 cm); skirt through the jacket at most 6 vertices, ≤ 0.7 cm, at the jacket's front edge (running jump before: 36 per frame, up to 4.9 cm); idle and walk fully clean. The back of the skirt never shows skin; when a knee comes up (run, jumps) up to 18 vertices of the thigh's front and the hip crease reach through the front of the skirt, mostly hidden behind the raised thigh.
 - **CharacterController** (on `Player` root):
   - `Height: 1.6` · `Center Y: 0.8` · `Radius: 0.35`
 
@@ -44,6 +47,7 @@ This repository contains the source code for a 3D third-person Unity game featur
     - **Cardigan / Sweater (`Tops_01_CLOTH`)**: Native purple with cool-tinted indigo shade (`#3A3052`).
     - **Body Skin (`Body_00_SKIN`)**: Soft warm peach anime shade (`#E29D86`).
     - **Face Skin (`Face_00_SKIN`)**: Pure white base with delicate blush shade (`#FBE6E3`), broad illumination step `0.1`, and zero outline width (`0.0`).
+  - **Double-sided cloth**: all Toon materials render both faces (`_CullMode 0`, as in the original VRoid materials), so the inside of the jacket, skirt and sleeves isn't see-through.
   - **Inverted-Hull Outlines**:
     - Mode: `Normal Direction` (`_OUTLINE_NML`).
     - Width: `1.0` (subtle anime ink line).
@@ -82,6 +86,9 @@ This repository contains the source code for a 3D third-person Unity game featur
 - **24 fps Locomotion Capture** (`Tools/Locomotion/4. Capture 24fps Sequence (Play Mode)`, `Assets/Scripts/Dev/LocomotionFrameCapture.cs`, editor-only):
   - Locks game time to exactly 1/24 s per frame and records idle / walk / run / sprint, start (idle → run), stop (run → idle), standing jump, running jump and a camera strafe from the game camera, a side view and a front view (contact sheets in `Captures/Locomotion_24fps/`, git-ignored). Each phase starts from the arena centre.
   - `report.txt` logs per frame: ground speed, planted-foot slip, shoe-sole height (lowest baked mesh vertex vs. floor), hip height and knee flexion.
+- **Cloth audit** (`Assets/Scripts/Dev/ClothLayerAudit.cs`, editor-only, Play Mode: `ClothLayerAudit.Begin("Captures/ClothAudit/<name>")`, optional phase list and `closeUp`):
+  - Drives the same movement phases at a locked 60 fps and measures on every frame, after the spring bones, how many vertices of an inner layer are outside the layer that covers them: skin through skirt, skirt through jacket, skin through jacket, with depth and *where* (height × angle around the hips).
+  - Contact sheet per phase (git-ignored `Captures/ClothAudit/`): game-camera direction, the same with the jacket hidden, from behind at ground level and from the side; or hip-height close-ups from the game direction, front-left, front-right and behind.
 
 ### 4. Camera System
 - **Wuthering Waves style camera (`ThirdPersonOrbitCamera.cs`)**:
@@ -110,7 +117,7 @@ Assets/
 │       └── jump.fbx                           # Jump_Takeoff / Jump_Air / Jump_Land
 ├── Editor/
 │   ├── MixamoLocomotionSetup.cs               # Mixamo import (clean T-pose), speed measurement, 24fps capture
-│   ├── ClothClippingFix.cs                    # Skirt tuck mesh, covered-skirt springs, arm clearance setup
+│   ├── ClothClippingFix.cs                    # Jacket hem rig, skirt weights & texture repair, covered-skirt springs, arm clearance
 │   ├── RenderQualityUpgrade.cs                # MSAA, texture mips/BC7/aniso, skinned bounds, fast spring bones
 │   ├── RestoreNinoMaterials.cs                # Material & shadow restoration tool
 │   └── PurgeHuTaoAndUpgradeNino.cs            # Asset maintenance utilities
@@ -122,16 +129,19 @@ Assets/
 │       ├── 5394265126170879566.Materials/
 │       ├── 5394265126170879566.Meshes/
 │       ├── 5394265126170879566.Textures/
-│       └── 5394265126170879566.BlendShapes/
+│       ├── 5394265126170879566.BlendShapes/
+│       └── ClothFix/                          # Generated: fixed Body mesh, repaired skirt textures
 └── Scripts/
     ├── AnimeCharacterController.cs            # Movement and locomotion logic
     ├── ThirdPersonOrbitCamera.cs              # WuWa-style follow camera
     ├── DiscardRootMotion.cs                   # Drops root motion on the character's Animator
     ├── ArmClothClearance.cs                   # Keeps hands out of the jacket
+    ├── JacketHemCloth.cs                      # Jacket hem physics with skirt/thigh collision
     ├── FastSpringBoneActivator.cs             # Burst job spring bones for the VRM model
     └── Dev/                                   # Editor-only diagnostics
         ├── LocomotionFrameCapture.cs          # 24fps capture + foot diagnostics
         ├── CharacterCloseupCapture.cs         # Close-up contact sheets (front/side/back)
+        ├── ClothLayerAudit.cs                 # Cloth layer clipping per frame + contact sheets, all movement phases
         └── ClothClipProbe.cs                  # Measures skirt/hand clipping on the baked mesh
 ```
 
@@ -139,7 +149,7 @@ Assets/
 
 ```
 Player                          (CharacterController, AnimeCharacterController)
- └── Nino_Model                 (Animator → Nino_LocomotionController, Humanoid, DiscardRootMotion, ArmClothClearance, FastSpringBoneActivator)
+ └── Nino_Model                 (Animator → Nino_LocomotionController, Humanoid, DiscardRootMotion, ArmClothClearance, JacketHemCloth, FastSpringBoneActivator)
       └── [VRM bone hierarchy]
 ```
 
