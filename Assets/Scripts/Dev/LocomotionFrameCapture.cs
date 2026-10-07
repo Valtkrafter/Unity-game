@@ -5,8 +5,8 @@ using System.Text;
 using UnityEngine;
 
 /// <summary>
-/// Editor-only diagnostic: drives AnimeCharacterController through idle/walk/run/sprint, start/stop and
-/// standing/running jumps, recording each phase at a locked 24 fps (Time.captureFramerate), so every cell is
+/// Editor-only diagnostic: drives AnimeCharacterController through idle / walk / run (Shift) and start / stop,
+/// recording each phase at a locked 24 fps (Time.captureFramerate), so every cell is
 /// 1/24 s apart. Writes three contact sheets per phase (game camera, side view, front view) and a text report
 /// with foot sliding, shoe-sole height, knee flexion, ground speed and animator state.
 ///
@@ -38,18 +38,15 @@ public sealed class LocomotionFrameCapture : MonoBehaviour
     private static readonly Phase[] Phases =
     {
         Steady("idle", Vector2.zero),
-        Steady("walk", Vector2.up, walk: true),
-        Steady("run", Vector2.up),
-        Steady("sprint", Vector2.up, sprint: true),
+        Steady("walk", Vector2.up),                      // walking is the default
+        Steady("run", Vector2.up, sprint: true),         // Shift held = run (the Blender walk cycle played faster)
         new Phase { Name = "start", SettleInput = Vector2.zero, Input = Vector2.up, Frames = 24 },
         new Phase { Name = "stop", SettleInput = Vector2.up, Input = Vector2.zero, Frames = 24 },
-        new Phase { Name = "jump", SettleInput = Vector2.zero, Input = Vector2.zero, Jump = true, Frames = 36 },
-        new Phase { Name = "run_jump", SettleInput = Vector2.up, Input = Vector2.up, Jump = true, Frames = 36 },
-        // Camera check: run to the camera's right; the camera should swing round behind the character.
+        // Camera check: walk to the camera's right; the camera should swing round behind the character.
         new Phase { Name = "camera_strafe", SettleInput = Vector2.zero, Input = Vector2.right, Frames = 36 },
     };
 
-    private static readonly string[] StateNames = { "Locomotion", "Jump_Takeoff", "Jump_Air", "Jump_Land" };
+    private static readonly string[] StateNames = { "Locomotion", "SpecialIdle" };
 
     private const int SettleFrames = Fps * 2; // 2 s to reach steady state before recording
 

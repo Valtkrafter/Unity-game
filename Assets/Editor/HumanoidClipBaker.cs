@@ -15,7 +15,7 @@ public static class HumanoidClipBaker
 {
     private const string NinoPrefab = "Assets/Models/Nino Nakano/5394265126170879566.prefab";
     private const string StreamDir = "Tools/AnimConvert/out";
-    private const string OutDir = "Assets/Animations/Candidates";
+    private const string OutDir = "Assets/Animations/Nino";
     // In the scene the Player's CharacterController hovers skinWidth (5 cm) above the floor and Nino_Model sits at
     // local y -2 cm, so the model origin is 3 cm above the ground (the Mixamo idle/jump clips are tuned to that).
     // Streams are solved with the soles on y = 0, so they are lowered by the same 3 cm.
@@ -29,8 +29,12 @@ public static class HumanoidClipBaker
     {
         public string name; public string source; public float fps; public bool loop;
         public float speed;           // ground speed the in-place cycle was authored for (m/s), 0 for gestures
-        public string outDir;         // asset folder, default Assets/Animations/Candidates
+        public string outDir;         // asset folder, default Assets/Animations/Nino
         public string[] bones; public List<Frame> frames;
+        // Optional face curves (Tools/AnimConvert/blender_export_streams.py): blend shape name -> weight 0..1 per frame, written as
+        // blendShape.<name> curves (0..100) on the Face SkinnedMeshRenderer. A stream without bones is a face-only clip.
+        public Dictionary<string, float[]> blend;
+        public string blendPath;      // transform path of the SkinnedMeshRenderer, default "Face"
     }
 
     [MenuItem("Tools/Animation/Bake Pose Streams To Humanoid Clips")]
@@ -45,6 +49,7 @@ public static class HumanoidClipBaker
     public static string Bake(string jsonPath)
     {
         var s = Newtonsoft.Json.JsonConvert.DeserializeObject<Stream>(File.ReadAllText(jsonPath));
+        if (s.bones == null || s.bones.Length == 0) return BakeFaceOnly(s);
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(NinoPrefab);
         var go = Object.Instantiate(prefab);
         go.hideFlags = HideFlags.HideAndDontSave;
@@ -153,6 +158,8 @@ public static class HumanoidClipBaker
                     for (int a = 0; a < 4; a++) clip.SetCurve("", typeof(Animator), $"{gn}Q.{"xyzw"[a]}", Reduce(goalQ[g][a], 0.001f));
                 }
 
+            AddBlendCurves(clip, s);
+
             var settings = AnimationUtility.GetAnimationClipSettings(clip);
             settings.loopTime = s.loop;
             // Streams are in place and already face +Z: keep everything exactly as authored.
@@ -164,13 +171,8 @@ public static class HumanoidClipBaker
             settings.keepOriginalPositionXZ = true;
             AnimationUtility.SetAnimationClipSettings(clip, settings);
 
-            string dir = string.IsNullOrEmpty(s.outDir) ? OutDir : s.outDir;
-            Directory.CreateDirectory(dir);
-            string path = $"{dir}/{s.name}.anim";
-            var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(path);
-            if (existing != null) { EditorUtility.CopySerialized(clip, existing); EditorUtility.SetDirty(existing); }
-            else AssetDatabase.CreateAsset(clip, path);
-            Debug.Log($"[HumanoidClipBaker] {path}: {n} frames @ {s.fps} fps from {s.source}, speed {s.speed:F3} m/s, humanScale {humanScale:F3}");
+            string path = WriteClip(clip, s);
+            Debug.Log($"[HumanoidClipBaker] {path}: {n} frames @ {s.fps} fps from {s.source}, speed {s.speed:F3} m/s, humanScale {humanScale:F3}, face curves {(s.blend == null ? 0 : s.blend.Count)}");
             return path;
         }
         finally
@@ -180,6 +182,67 @@ public static class HumanoidClipBaker
     }
 
     private static int Depth(Transform t) { int d = 0; while (t.parent != null) { t = t.parent; d++; } return d; }
+
+    /// <summary>Face-only stream (no bones): a plain clip holding just the blendShape.* curves, played on its own Animator layer.</summary>
+    private static string BakeFaceOnly(Stream s)
+    {
+        var clip = new AnimationClip { name = s.name, frameRate = s.fps };
+        AddBlendCurves(clip, s);
+        var settings = AnimationUtility.GetAnimationClipSettings(clip);
+        settings.loopTime = s.loop;
+        AnimationUtility.SetAnimationClipSettings(clip, settings);
+        string path = WriteClip(clip, s);
+        Debug.Log($"[HumanoidClipBaker] {path}: face-only, {s.frames.Count} frames @ {s.fps} fps, {(s.blend == null ? 0 : s.blend.Count)} curves");
+        return path;
+    }
+
+    private static void AddBlendCurves(AnimationClip clip, Stream s)
+    {
+        if (s.blend == null || s.blend.Count == 0) return;
+        string path = string.IsNullOrEmpty(s.blendPath) ? "Face" : s.blendPath;
+        foreach (var kv in s.blend)
+        {
+            var curve = new AnimationCurve();
+            for (int i = 0; i < kv.Value.Length; i++) curve.AddKey(new Keyframe(i / s.fps, kv.Value[i] * 100f));   // Unity blend shape weights are 0..100
+            clip.SetCurve(path, typeof(SkinnedMeshRenderer), "blendShape." + kv.Key, MonotoneTangents(curve));
+        }
+    }
+
+    /// <summary>
+    /// Smooth tangents that never overshoot between keys (Fritsch-Carlson). Blend shape weights must stay inside 0..100: the
+    /// ordinary smoothed tangents pushed an eye-close ramp to 105, which closes the lids through each other.
+    /// </summary>
+    private static AnimationCurve MonotoneTangents(AnimationCurve curve)
+    {
+        var k = curve.keys;
+        int n = k.Length;
+        if (n < 2) return curve;
+        var d = new float[n - 1];
+        for (int i = 0; i < n - 1; i++) d[i] = (k[i + 1].value - k[i].value) / (k[i + 1].time - k[i].time);
+        var m = new float[n];
+        m[0] = d[0];
+        m[n - 1] = d[n - 2];
+        for (int i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0f ? 0f : 0.5f * (d[i - 1] + d[i]);
+        for (int i = 0; i < n - 1; i++)
+        {
+            if (Mathf.Abs(d[i]) < 1e-9f) { m[i] = m[i + 1] = 0f; continue; }
+            float a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+            if (s > 9f) { float t = 3f / Mathf.Sqrt(s); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i]; }
+        }
+        for (int i = 0; i < n; i++) { k[i].inTangent = m[i]; k[i].outTangent = m[i]; }
+        return new AnimationCurve(k);
+    }
+
+    private static string WriteClip(AnimationClip clip, Stream s)
+    {
+        string dir = string.IsNullOrEmpty(s.outDir) ? OutDir : s.outDir;
+        Directory.CreateDirectory(dir);
+        string path = $"{dir}/{s.name}.anim";
+        var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(path);
+        if (existing != null) { EditorUtility.CopySerialized(clip, existing); EditorUtility.SetDirty(existing); }
+        else AssetDatabase.CreateAsset(clip, path);
+        return path;
+    }
 
     /// <summary>
     /// Keyframe reduction: keeps the keys a Douglas-Peucker pass needs to stay within eps of the per-frame samples,

@@ -482,9 +482,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 464fd2922b7b5584981de97636d35fed, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AnimeCharacterController
-  walkSpeed: 0.84
-  runSpeed: 2.3
-  sprintSpeed: 3.1
+  walkSpeed: 1.33
+  runSpeed: 2.26
   acceleration: 9
   deceleration: 7
   rotationSmoothTime: 0.08
@@ -498,6 +497,9 @@ MonoBehaviour:
     m_Bits: 1
   idleFlourishDelay: 8
   idleFlourishRepeat: 20
+  faceLayer: 1
+  faceFadeTime: 0.12
+  jumpAnimationAvailable: 0
   orbitCamera: {fileID: 0}
   animator: {fileID: 1241374974}
 --- !u!1 &330585543

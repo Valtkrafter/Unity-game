@@ -5,8 +5,8 @@ using System.Text;
 using UnityEngine;
 
 /// <summary>
-/// Editor-only cloth audit for the player. Drives AnimeCharacterController through idle, walk, run, sprint,
-/// start, stop, a 180 turn and standing/running jumps with the game simulated at a locked 60 fps, and on every
+/// Editor-only cloth audit for the player. Drives AnimeCharacterController through idle, walk, run (Shift),
+/// start, stop and a 180 turn with the game simulated at a locked 60 fps, and on every
 /// frame, after the animation and the spring bones, measures on the skinned Body mesh how the clothing layers
 /// overlap (all three should stay at 0):
 /// - skin through skirt   (butt/thighs showing through the skirt)
@@ -44,14 +44,12 @@ public sealed class ClothLayerAudit : MonoBehaviour
     private static readonly Phase[] AllPhases =
     {
         new Phase { Name = "idle", Seconds = 1.2f },
-        new Phase { Name = "walk", SettleInput = Vector2.up, Input = Vector2.up, Walk = true, Seconds = 1.2f },
-        new Phase { Name = "run", SettleInput = Vector2.up, Input = Vector2.up, Seconds = 1.2f },
-        new Phase { Name = "sprint", SettleInput = Vector2.up, Input = Vector2.up, Sprint = true, Seconds = 1.2f },
+        new Phase { Name = "walk", SettleInput = Vector2.up, Input = Vector2.up, Seconds = 1.2f },                  // walking is the default
+        new Phase { Name = "run", SettleInput = Vector2.up, Input = Vector2.up, Sprint = true, Seconds = 1.2f },   // Shift held = run
         new Phase { Name = "start", Input = Vector2.up, Seconds = 1.2f },
         new Phase { Name = "stop", SettleInput = Vector2.up, Seconds = 1.2f },
         new Phase { Name = "turn", SettleInput = Vector2.up, Input = Vector2.down, Seconds = 1.2f },
-        new Phase { Name = "jump", Jump = true, Seconds = 1.8f },
-        new Phase { Name = "run_jump", SettleInput = Vector2.up, Input = Vector2.up, Jump = true, Seconds = 1.8f },
+        // jump phases come back with a Blender jump set (AnimeCharacterController.jumpAnimationAvailable)
     };
 
     // ---- views ----

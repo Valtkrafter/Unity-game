@@ -6,12 +6,12 @@ This repository contains the source code for a 3D third-person Unity game featur
 
 ### 1. Character & Movement
 - **Anime Character Controller (`AnimeCharacterController.cs`)**: Handles responsive character movement, aligning the character's forward direction with the camera's planar view.
-  - **Stride-Matched Movement Speeds**: Walk `0.84 m/s` · Run `2.3 m/s` · Sprint `3.1 m/s`. These are the natural ground speeds of the Unity-chan walk/run clips on Nino, measured from the standing foot (`Tools/Locomotion/2. Measure Natural Clip Speeds`), so her feet stay locked to the floor.
-  - **Idle flourish**: after `8 s` standing still (then every `20 s`), sets the `SpecialIdle` trigger (Nino's model pose).
-  - **Smooth starts & stops**: acceleration `9 m/s²` (idle → run in ~0.4 s, one walking step into the run) and deceleration `7 m/s²` (run → idle in ~0.5 s, one or two slowing steps). Movement speed and the Animator `Speed` parameter share the same ramped value, so the feet stay in sync with the blend tree.
+  - **Walk is the standard, Shift runs**: moving with WASD walks at `1.33 m/s`; holding **Shift** runs at `2.26 m/s` (no more Ctrl-to-walk / Shift-to-sprint). Both are the natural ground speeds of the Blender walk clip, measured from the planted foot (`Tools/Locomotion/2. Measure Natural Clip Speeds`), so her feet stay locked to the floor (planted-foot slide avg `0.02 m/s` walking, `0.04 m/s` running). Until there is a real run clip, the run is the same walk cycle played `1.7x` faster.
+  - **Special idle**: after `8 s` standing still (then every `20 s`), sets the `SpecialIdle` trigger: Nino's **Hmph** (arms crossed, head whips away, puffed cheeks and pout, a glare back, then she lets go).
+  - **Smooth starts & stops**: acceleration `9 m/s²` and deceleration `7 m/s²`. Movement speed and the Animator `Speed` parameter share the same ramped value, so the feet stay in sync with the blend tree.
   - Cached parameter hashes (`Speed`, `IsGrounded`, `VerticalVelocity`).
-  - Static input overrides (`UseInputOverride`, `InputOverride`, `WalkOverride`, `SprintOverride`, `JumpOverride`) for automated testing.
-  - Gravity-based jumping (`jumpHeight: 1.8`, `gravity: -25.0`) with a `0.07 s` takeoff delay so the body leaves the ground when the push-off animation's feet do. Sets `AirProgress` (0 = takeoff, 0.5 = apex, 1 = landing) from the vertical velocity.
+  - Static input overrides (`UseInputOverride`, `InputOverride`, `SprintOverride` = Shift held = run, `JumpOverride`) for automated testing.
+  - Gravity-based jumping (`jumpHeight: 1.8`, `gravity: -25.0`). There is no jump animation at the moment (all old clips were removed when the Blender animations replaced them), so Space only moves her physically and `jumpAnimationAvailable` stays off; turn it on once a Blender jump set is in the Animator. `AirProgress` (0 = takeoff, 0.5 = apex, 1 = landing) is still set from the vertical velocity.
   - Rotation smoothing (`0.08s`).
 - **Character Model — Nino Nakano (VRM)**: Active player avatar imported via UniVRM.
   - Located at `Assets/Models/Nino Nakano/` (VRM source: `5394265126170879566.vrm`).
@@ -29,7 +29,7 @@ This repository contains the source code for a 3D third-person Unity game featur
   - **Skirt fitted to the body**: the skirt keeps its imported shape (an earlier 3 cm "tuck" of its hidden part pushed it into her hips, so her bottom showed through as soon as the jacket moved). Spring-bone influence above each skirt bone's pivot fades out (those points moved into her bottom when the skirt swung out behind a leg), and where the skirt fits tightly its other weights follow the skin under it. The lower skirt still swings on its springs.
   - **Skirt texture cut-outs**: both skirt layers had holes under the front band and on the sides. The band didn't cover its hole exactly (black zigzag across the front of the skirt) and the side holes showed when the jacket moved. Filled wherever the band doesn't cover the skirt (`ClothFix/_17_ClothFix.png`, `_19_ClothFix.png`; the band's soft edge recoloured in `_18_ClothFix.png`).
   - **Hands in the jacket (`ArmClothClearance`)**: each frame, ~700 points of the jacket's lower surface are skinned on the CPU; if a hand/finger tip is inside, the upper arm rotates outward just enough (+1.2 cm clearance), easing back when free. Measured: hands inside the jacket 120/120 idle frames (up to 5.2 cm) → 0, running 25/120 → 0.
-  - **Measured** with `ClothLayerAudit` (every frame at 60 fps of idle, walk, run, sprint, start, stop, 180° turn, standing and running jump): legs through the jacket `0` in every phase (running jump before: 23 vertices per frame, up to 5.8 cm); skirt through the jacket at most 6 vertices, ≤ 0.7 cm, at the jacket's front edge (running jump before: 36 per frame, up to 4.9 cm); idle and walk fully clean. The back of the skirt never shows skin; when a knee comes up (run, jumps) up to 18 vertices of the thigh's front and the hip crease reach through the front of the skirt, mostly hidden behind the raised thigh.
+  - **Measured** with `ClothLayerAudit` (every frame at 60 fps of idle, walk, run, start, stop and a 180° turn with the Blender clips): legs through the jacket `0` in every phase; skin through the skirt at most 1 vertex, 0.3 cm; skirt through the jacket at most 8 vertices, ≤ 0.9 cm, at the jacket's front edge (while running; walking at most 4 vertices, 0.4 cm); idle and stop fully clean. The back of the skirt never shows skin. (The jump phases come back with a Blender jump set.)
 - **CharacterController** (on `Player` root):
   - `Height: 1.6` · `Center Y: 0.8` · `Radius: 0.35`
 
@@ -64,80 +64,26 @@ This repository contains the source code for a 3D third-person Unity game featur
   - Original VRM URP Unlit materials backed up safely at `Assets/Models/Nino Nakano/Backup_Materials_URP_Unlit/`.
 
 ### 3. Animation System
-- **Nino's locomotion: Unity-chan** (`Assets/ThirdParty/UnityChan/Animations/`, from the free *Unity-Chan! Model* 1.2.2 on the Asset Store, Unity Technologies Japan, Unity-Chan License): Unity humanoid FBX clips that retarget directly onto Nino, with no conversion.
-  - **Walk (`unitychan_WALK00_F`)**: natural, light anime walk. 1.3 s cycle, `0.84 m/s`.
-  - **Run (`unitychan_RUN00_F`)**: light anime run with relaxed arm swing. 0.8 s cycle, `2.3 m/s`; sprint plays it at 1.35x (`3.1 m/s`).
-  - Only the 26 animation FBX files were extracted from the package (with their original .meta); none of its old scripts, shaders or scenes are in the project. Other clips ready to use: idles `WAIT00`–`WAIT04` (calm stance, stretch, look around, peek, twirl), `JUMP00/01`, `WIN00`, `LOSE00`, `DAMAGED00/01`, `SLIDE00`, `UMATOBI00`, side/back walks and runs.
-  - Import settings (written by `Tools/Locomotion/3`): loop, root rotation/Y/XZ baked (Original), per-clip height offset so the soles touch the floor in the scene (walk `0.035`, run `-0.01`).
-  - Measured in Play Mode (`Tools/Locomotion/4`): walk shoe sole `-1.1..0.7 cm` (median `0.0`), standing-foot slide avg `0.12 m/s`; run sole `>= -0.6 cm`.
-- **Why not the MMD clips**: the MMD walk/run converted on 2026-10-04 (`Assets/Animations/Nino/Walk_Nino`, `Run_Nino`, plus `Candidates/`) passed every technical check but looked wrong in play: the run had arms flying out at shoulder height, very high knees and lunge-length strides; the walk looked crouched with bent knees. They stay in the project for reference and are not used. The conversion pipeline (`Tools/AnimConvert`) is still the route for `.vmd`/`.vrma` sources such as the VRoid gestures.
-- **Idle**: `Female Locomotion Pack/idle.fbx` (Mixamo, 8.3 s breathing idle in a hand-on-hip pose).
-  - **Idle flourish (`SpecialIdle` state)**: once Nino has stood still for `8 s` (then every `20 s`), `AnimeCharacterController` fires the `SpecialIdle` trigger and she strikes the VRoid *Model pose*: hand on hip, then she touches her hair. Moving or jumping cuts it short.
-- **Gestures** (`Assets/Animations/Nino/Gestures/`, VRoid Project motion pack, ready for the interaction system): `VRoid_Greeting`, `VRoid_PeaceSign`, `VRoid_ModelPose`, `VRoid_ShowFullBody`, `VRoid_Spin`, `VRoid_Squat`, `VRoid_Shoot`.
-- **Candidates** (`Assets/Animations/Candidates/`, not used in game, kept for comparison): MMD *Normal / Lazy / Cool guy* walks, Mahlazer's walk, *Female / Male* runs.
-- **Jump (`Female Locomotion Pack/jump.fbx`)**: split into three states:
-  - `Jump_Takeoff`: frames 29–37, the push-off after the anticipation crouch.
-  - `Jump_Air`: frames 37–63. Its vertical motion is left unbaked, so the clip's own 0.27 m hop is dropped and only the physics jump lifts the body.
-  - `Jump_Land`: frames 63–100.
-  - All three use `level +0.04` so the feet sit on the floor.
-- **Motion conversion pipeline (`Tools/AnimConvert/`, Python 3 + numpy)**: `convert_all.sh` rebuilds every clip from the downloaded sources (default `~/Downloads/TQQ animation`, not in the repo).
-  - `vmd2clip.py` (MMD `.vmd`) first rebuilds an MMD-standard skeleton with **Nino's own proportions** (`nino_rest.json`, exported from her T-pose). It then:
-    - evaluates the VMD bezier tracks;
-    - converts MMD space (which faces −Z) to Unity;
-    - compensates the MMD A-pose arms (37°);
-    - solves the leg IK (`足ＩＫ`/`つま先ＩＫ`) analytically, with MMD's minimal-swing behaviour.
-  - After that, `vmd2clip.py` applies:
-    - **Loop detection**: finds the cycle period/start with the smallest pose difference.
-    - **Ground contact**: the MMD foot targets fit the source model, not Nino, so each foot whose target has stopped is planted with the lowest point of Nino's shoe at y = 0. A moving foot is never pulled down (no early touchdown or skid) and keeps 1 cm of swing clearance.
-    - **Style options**: `--lift` (foot lift), `--sway` (pelvis rotation), `--chest`/`--chin` (posture), `--scale` (stride for differently sized source models), `--dy`.
-    - **Report**: loop error, travel speed, standing-foot speed, knee range and support-foot height.
-  - `vrma2clip.py` (VRM Animation `.vrma`): reads the glTF humanoid and outputs each bone's world rotation relative to its T-pose (glTF to Unity: X mirrored), with the hips scaled to Nino.
-  - `make_gifs.py`: turns `AnimShowcaseCapture` frames into labelled comparison GIFs.
-  - **`HumanoidClipBaker.cs`** (`Tools/Animation/Bake Pose Streams To Humanoid Clips`) applies each pose stream to a hidden copy of Nino and records it with `HumanPoseHandler` as a humanoid clip:
-    - Curves: root, all 95 muscles, and **IK goal curves** (`LeftFootT/Q`...). Without the goal curves, any foot-IK playback (for example a Playable) folds the legs.
-    - Keyframe reduction keeps every bone within ~2 mm of the per-frame samples.
-    - Root settings are in place: rotation, Y and XZ all baked, based on Original.
-    - Streams are lowered 3 cm because the model origin sits 3 cm above the floor in the scene (see Character Model).
-- **Mixamo retargeting (`Assets/Editor/MixamoLocomotionSetup.cs`, `Tools/Locomotion/1. Reimport Mixamo Clips With Clean T-Pose`)**, still used for the idle and jump:
-  - **Clean shared reference T-pose**: Mixamo files downloaded without skin have no bind pose, so Unity used each file's first frame as the humanoid reference.
-    - Problem: legs tilted ~7°, and each clip got a different hip height (body scale `0.939` for the crouched run vs `1.054` for idle). The run floated ~10 cm and Nino's legs bent.
-    - Fix: every Mixamo clip uses one generated T-pose: level hips, vertical spine and legs, horizontal arms, feet forward, hips at standing height `1.054 m`.
-  - **Toes**: not mapped in the clip avatars, so Mixamo toe-roll never deforms the VRM shoe meshes.
-  - **Root Transform Rotation**: baked, Body Orientation. **Position Y**: baked, Original, `level 0` (no offset hacks). **Position XZ**: baked, Center of Mass (jump keeps Original).
-- **Animator Controller** (`Assets/Animations/Nino_LocomotionController.controller`, assigned directly on `Nino_Model`, rebuilt by `Tools/Locomotion/3. Apply Speeds To Blend Tree And Scene`):
-  - **Parameters**: `Speed` (Float), `Jump` (Trigger), `SpecialIdle` (Trigger), `VerticalVelocity` (Float), `IsGrounded` (Bool), `AirProgress` (Float).
-  - **Base Layer Settings**: `IK Pass = false`, `iKOnFeet = false`.
-  - **Locomotion Blend Tree** (1D, driven by `Speed`). Tool 3 configures the clips' import settings, measures each clip's standing-foot speed and writes the thresholds and the controller speeds together. Thresholds:
-    - `0.0` → breathing idle
-    - `0.84` → `unitychan_WALK00_F` (1x)
-    - `2.3` → `unitychan_RUN00_F` (1x)
-    - `3.1` → `unitychan_RUN00_F` (1.35x, sprint)
-  - **Jump States**:
-    - `Locomotion → Jump_Takeoff`: on the `Jump` trigger, 0.08 s.
-    - `Jump_Takeoff → Jump_Air`: at the end of takeoff. Motion time = `AirProgress`, so the pose follows the physics arc for any height; walking off a ledge also enters it.
-    - `Jump_Air → Jump_Land`: when `IsGrounded` and falling.
-    - `Jump_Land → Locomotion`: after 20% when moving (she runs out of the landing), or 60% when standing.
-    - `Jump_Land → Jump_Takeoff` allows chained jumps.
-  - **SpecialIdle**:
-    - `Locomotion → SpecialIdle`: on the `SpecialIdle` trigger while `Speed < 0.05`, 0.45 s.
-    - `SpecialIdle → Locomotion`: at 92% (0.6 s), or immediately when `Speed > 0.1`.
-    - `SpecialIdle → Jump_Takeoff`: on `Jump`.
-- **24 fps Locomotion Capture** (`Tools/Locomotion/4. Capture 24fps Sequence (Play Mode)`, `Assets/Scripts/Dev/LocomotionFrameCapture.cs`, editor-only):
-  - Locks game time to exactly 1/24 s per frame. Records idle, walk, run, sprint, start (idle → run), stop (run → idle), standing jump, running jump and a camera strafe.
-  - Each phase starts from the arena centre and is shot from the game camera, a side view and a front view (contact sheets in `Captures/Locomotion_24fps/`, git-ignored).
-  - `report.txt` logs per frame: ground speed, standing-foot slip, shoe-sole height (lowest baked mesh vertex vs. floor), hip height and knee flexion.
-- **Animation showcase** (`Assets/Scripts/Dev/AnimShowcaseCapture.cs`, editor-only, Play Mode):
-  - Plays any clips on the in-game Nino (spring bones, jacket cloth, toon shading) through a PlayableGraph while moving her at the clip's ground speed.
-  - Writes front-3/4 and side frames per clip (`Captures/AnimCandidates/`) for `make_gifs.py`.
-  - `ClipPreviewSheet.cs` renders quick edit-mode contact sheets (no spring bones).
-- **Cloth audit** (`Assets/Scripts/Dev/ClothLayerAudit.cs`, editor-only, Play Mode: `ClothLayerAudit.Begin("Captures/ClothAudit/<name>")`, optional phase list and `closeUp`):
-  - Drives the same movement phases at a locked 60 fps. On every frame, after the spring bones, it measures how many vertices of an inner layer are outside the layer that covers them: skin through skirt, skirt through jacket, skin through jacket. It reports the depth and *where* (height × angle around the hips).
-  - Writes a contact sheet per phase (git-ignored `Captures/ClothAudit/`). Wide views: game-camera direction, the same with the jacket hidden, from behind at ground level, and from the side. Close-ups at hip height: game direction, front-left, front-right and behind.
-- **Credits**:
-  - Walk/run: **Unity-chan** © Unity Technologies Japan / UCL ("Unity-Chan! Model", Asset Store).
-  - MMD candidate walk/run cycles: **tweekcrystal** (DeviantArt, "Various Walk Cycles").
-  - Walking motion: **Mahlazer** (LearnMMD).
-  - Gestures: **Animation credits to pixiv Inc.'s VRoid Project** (VRMA_MotionPack).
+All of Nino's animation comes from **Blender** (the VRM armature, `Blender_Animations/`): idle, walk and the special idle (Hmph). Every older clip (Unity-chan, Mixamo, MMD, VRoid gestures, Kevin Iglesias, AnimeGirlIdle) was moved out of the project on 2026-10-07 into `C:\Users\valen\Wuwa_Clone_OldAnimations_Backup\` (same folder layout, nothing deleted).
+- **Clips** (`Assets/Animations/Nino/`, 24 fps humanoid clips made by `HumanoidClipBaker` from Blender pose streams):
+  - `Nino_Idle` (5 s loop, standing pose with breathing and weight shift)
+  - `Nino_Walk` (1 s loop, `1.33 m/s`, in place; every stream is lowered 3 cm because the model origin sits 3 cm above the floor in the scene)
+  - `Nino_Special_Hmph` (5 s, one-shot, starts and ends on the idle pose; body + the face curves `Fcl_EYE_Close`, `Fcl_EYE_Angry`, `Fcl_BRW_Angry`, `Fcl_MTH_Small`, `Fcl_MTH_Angry` and the custom `Nino_cheek_puff` / `Nino_mouth_pout`)
+  - `Nino_Idle_Face` (12 s loop, face only, played while she stands: blinks at irregular times, one closed-mouth "^_^" and a slowly moving closed smile. **The mouth never opens**: `Fcl_MTH_Joy`, the open-mouth smile, is held at 0 on purpose. The loop is 12 s, so it does not visibly repeat while she waits for the special idle)
+  - `Nino_Face` (3 s loop, face only, played while she moves: blinks and the happy walk smile, which does open the mouth once per loop)
+- **Blender -> Unity pipeline**:
+  1. `Tools/AnimConvert/blender_export_streams.py` (run inside Blender) writes pose streams to `Tools/AnimConvert/out/*.json`: per frame the hips position and each humanoid bone's world rotation relative to the T-pose (Blender -> Unity axes: `(x, y, z) -> (-x, z, -y)`), plus the face blend shape weights (`export_face_action` writes a face-only stream straight from a shape-key action, e.g. `Nino_Idle_Face`). It also exports the custom shape-key deltas to `Tools/AnimConvert/blendshapes/nino_face_custom.json`.
+  2. `Tools/Animation/Bake Pose Streams To Humanoid Clips` (`HumanoidClipBaker.cs`) bakes the streams into `.anim` clips on Nino's own avatar (muscles, root and IK goal curves, `blendShape.*` curves on `Face`; a stream without bones becomes a face-only clip; blend shape curves use no-overshoot tangents so weights stay in 0..100).
+  3. `Tools/Character/Add Custom Face Blend Shapes (from Blender)` (`NinoFaceBlendShapes.cs`) adds `Nino_cheek_puff` and `Nino_mouth_pout` to the VRM Face mesh (vertices matched by position, appended after the 57 VRoid shapes). Re-run it after re-importing the VRM.
+  4. `Tools/Locomotion/1. Build Animator From Blender Clips` (`NinoLocomotionSetup.cs`) measures the walk's ground speed, rebuilds the Animator Controller in place and writes the speeds into the scene.
+- **Animator Controller** (`Assets/Animations/Nino_LocomotionController.controller`, assigned on `Nino_Model`):
+  - **Parameters**: `Speed` (Float), `SpecialIdle` (Trigger), `Jump` (Trigger, unused for now), `VerticalVelocity` (Float), `IsGrounded` (Bool), `AirProgress` (Float).
+  - **Base layer**: `Locomotion` blend tree on `Speed`: `0` idle, `1.33` walk, `2.26` walk at `1.7x` (run). `SpecialIdle` (tag `Special`, the Hmph): `Locomotion -> SpecialIdle` on the trigger while `Speed < 0.05` (0.3 s), back to `Locomotion` at 88% of the clip (0.45 s) or immediately when she starts moving.
+  - **Face layer** (masked to the Face mesh by `Nino_FaceOnly.mask`): `FaceIdle` (`Nino_Idle_Face`, mouth always closed) while standing and `FaceMove` (`Nino_Face`) while moving, switched at `Speed` 0.1 with a 0.3 s crossfade. `AnimeCharacterController` fades the layer weight to 0 while a `Special`-tagged state plays, so the special's own face shows, and back to 1 afterwards.
+- **Checks** (Play Mode, Tools/Locomotion/3 and 4, `ClothLayerAudit`): walk ground speed `1.33 m/s`, planted-foot slide avg `0.02 m/s`, soles on the floor (median `0.0 cm`); run `2.26 m/s`, slide avg `0.04 m/s`; legs through the jacket `0` in every phase, skirt through jacket at most 8 vertices / 0.9 cm at the jacket's front edge; the Hmph runs through the real Animator (Special state, face layer hand-over, puff and pout reach 98 and 100).
+- **Capture tools** (editor-only, Play Mode): `Tools/Locomotion/3. Capture 24fps Sequence` (idle, walk, run, start, stop, camera: foot slide, sole height, contact sheets in `Captures/Locomotion_24fps/`) `Tools/Locomotion/4. Capture Special Idle` (face close-up and body frames of the Hmph in `Captures/SpecialIdle/`) and `Tools/Locomotion/5. Capture Idle Face` (7.5 s standing, 2.5 s walking, then standing: face layer state, blend shape weights and the real mouth height measured on the skinned mesh, face close-ups in `Captures/IdleFace/`; standing: open-mouth shape `0`, mouth height 24.5-26.6 mm where open is 30+ mm).
+- **Still to make in Blender**: a real run, jump / air / landing, idle<->walk transitions, the other specials (Point, Shy).
+- **Credits**: animation authored in Blender for this project. The third-party packs that were removed: Unity-chan (Unity Technologies Japan), Mixamo, Kevin Iglesias Human Animations, AnimeGirlIdleAnimations, MMD walks (tweekcrystal, Mahlazer), VRoid Project gestures.
 
 ### 4. Camera System
 - **Wuthering Waves style camera (`ThirdPersonOrbitCamera.cs`)**:
@@ -145,7 +91,7 @@ This repository contains the source code for a 3D third-person Unity game featur
   - Scroll-wheel zoom (`1.6–8 m`, default `4.2 m`, `0.6 m` per notch; works with the Input System's uniform ±1-per-notch scroll and the older ±120 range, and even while the cursor is unlocked); the camera pulls closer when looking up so it never digs into the ground.
   - Tight horizontal follow (`0.05 s`) with a softer vertical follow (`0.18 s`), so jumps and steps don't jolt the view.
   - Auto-recenter: while running sideways the camera swings round behind the character (up to `70°/s`), and pitch eases back to `12°`. Pauses for `0.6 s` after any mouse input and never fights you when running towards the camera.
-  - FOV `50°`, widening by `5°` while sprinting.
+  - FOV `50°`, widening by `5°` while running (Shift).
   - Collision: snaps in front of walls instantly, eases back out over `0.25 s`.
   - Cursor locked in play; hold **Left Alt** to free it, **Esc** unlocks, click relocks.
 
@@ -157,22 +103,14 @@ This repository contains the source code for a 3D third-person Unity game featur
 ```
 Assets/
 ├── Animations/
-│   ├── Nino_LocomotionController.controller  # Active locomotion state machine
-│   ├── Nino/                                  # Generated by Tools/AnimConvert + HumanoidClipBaker
-│   │   ├── Walk_Nino.anim, Run_Nino.anim      # MMD walk/run (not used, see Animation System)
-│   │   └── Gestures/                          # VRoid gestures (ModelPose = idle flourish)
-│   ├── Candidates/                            # Other converted walks/runs, for comparison only
-│   ├── X Bot@Female Standing Pose.fbx         # Single-frame version of the idle pose (not in the blend tree)
-│   ├── X Bot@Female Walk.fbx                  # Old Mixamo walk (not in the blend tree)
-│   ├── X Bot@Running.fbx                      # Old Mixamo run (not in the blend tree)
-│   └── Female Locomotion Pack/                # Supplementary clips (strafes, turns)
-│       ├── idle.fbx                           # Breathing idle (active)
-│       └── jump.fbx                           # Jump_Takeoff / Jump_Air / Jump_Land
-├── ThirdParty/
-│   └── UnityChan/Animations/                  # Unity-chan animation FBXs (walk/run in use, idles/jumps/etc.)
+│   ├── Nino_LocomotionController.controller  # Locomotion blend tree + SpecialIdle + Face layer
+│   └── Nino/                                  # Baked from Blender by HumanoidClipBaker
+│       ├── Nino_Idle.anim, Nino_Walk.anim, Nino_Special_Hmph.anim, Nino_Idle_Face.anim, Nino_Face.anim
+│       └── Nino_FaceOnly.mask                 # Face layer mask
 ├── Editor/
-│   ├── MixamoLocomotionSetup.cs               # Mixamo import (clean T-pose), speed measurement, controller build, 24fps capture
-│   ├── HumanoidClipBaker.cs                   # Pose streams (Tools/AnimConvert) -> humanoid clips
+│   ├── NinoLocomotionSetup.cs                 # Animator builder, speed measurement, 24fps / special-idle capture menus
+│   ├── NinoFaceBlendShapes.cs                 # Custom Face blend shapes (puff, pout) from Blender
+│   ├── HumanoidClipBaker.cs                   # Pose streams (Tools/AnimConvert) -> humanoid clips (+ face curves)
 │   ├── ClipPreviewSheet.cs                    # Edit-mode clip contact sheets
 │   ├── ClothClippingFix.cs                    # Jacket hem rig, skirt weights & texture repair, covered-skirt springs, arm clearance
 │   ├── RenderQualityUpgrade.cs                # MSAA, texture mips/BC7/aniso, skinned bounds, fast spring bones
@@ -222,10 +160,9 @@ Player                          (CharacterController, AnimeCharacterController)
 | Input | Action |
 |---|---|
 | WASD / Arrow Keys | Move |
-| Left Ctrl + Move | Walk (slow) |
-| Move (default) | Run |
-| Left Shift + Move | Sprint |
-| Space | Jump |
+| Move (default) | Walk |
+| Shift (hold) + Move | Run |
+| Space | Jump (physics only, no jump animation yet) |
 | Mouse | Camera orbit (pitch / yaw) |
 | Scroll Wheel | Camera zoom |
 | Left Alt (hold) | Free the cursor |

@@ -7,16 +7,16 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(CharacterController))]
 public sealed class AnimeCharacterController : MonoBehaviour
 {
-    // Speeds match the stride of Nino's walk/run clips (measured with Tools/Locomotion/2. Measure Natural Clip Speeds)
-    // so the planted foot stays locked to the ground. Change them together with the blend tree thresholds.
-    // Tools/Locomotion/3 writes both.
+    // Walking is the standard movement; Shift (held) runs. The speeds match the stride of Nino's Blender walk clip
+    // (measured with Tools/Locomotion/2. Measure Natural Clip Speeds) so the planted foot stays locked to the ground;
+    // the run is the same walk cycle played faster (NinoLocomotionSetup.RunPlaybackRate) until there is a run clip.
+    // Tools/Locomotion/1 writes these two values together with the blend tree thresholds.
     [Header("Locomotion Speeds (m/s)")]
-    [SerializeField] private float walkSpeed = 0.95f;
-    [SerializeField] private float runSpeed = 3.4f;
-    [SerializeField] private float sprintSpeed = 4.6f;
+    [SerializeField] private float walkSpeed = 1.33f;
+    [SerializeField] private float runSpeed = 2.26f;
     // Movement speed and the Animator Speed parameter share one ramped value, so feet stay in sync on starts/stops.
-    [SerializeField] private float acceleration = 9.0f;  // m/s^2 (idle -> run in ~0.4 s)
-    [SerializeField] private float deceleration = 7.0f;  // m/s^2 (run -> idle in ~0.5 s: one or two slowing steps)
+    [SerializeField] private float acceleration = 9.0f;  // m/s^2 (idle -> walk in ~0.15 s)
+    [SerializeField] private float deceleration = 7.0f;  // m/s^2 (walk -> idle in ~0.2 s)
 
     [Header("Rotation Tuning")]
     [SerializeField] private float rotationSmoothTime = 0.08f;
@@ -31,12 +31,23 @@ public sealed class AnimeCharacterController : MonoBehaviour
     [SerializeField] private float groundedStickiness = -3.0f;
     [SerializeField] private LayerMask groundLayer = 1; // Default to layer 1
 
-    [Header("Idle Flourish")]
-    [Tooltip("Seconds standing still before Nino strikes her model pose (SpecialIdle).")]
+    [Header("Special Idle")]
+    [Tooltip("Seconds standing still before Nino plays her special idle (the Hmph).")]
     [SerializeField] private float idleFlourishDelay = 8f;
-    [Tooltip("Seconds between flourishes while she keeps standing.")]
+    [Tooltip("Seconds between specials while she keeps standing.")]
     [SerializeField] private float idleFlourishRepeat = 20f;
     private float idleTimer;
+
+    [Header("Face Layer")]
+    [Tooltip("Animator layer that loops the idle face (blinks, smile). Its weight fades to 0 while a state tagged 'Special' plays, so the special's own face shows.")]
+    [SerializeField] private int faceLayer = NinoFaceLayerIndex;
+    [SerializeField] private float faceFadeTime = 0.12f;
+    private const int NinoFaceLayerIndex = 1;
+    private float faceWeight = 1f;
+    private float faceWeightVelocity;
+
+    [Tooltip("Turn on once the Animator has Jump states (a jump set from Blender). Off: Space still moves her physically but no jump animation is triggered.")]
+    [SerializeField] private bool jumpAnimationAvailable = false;
 
     [Header("Camera Reference")]
     [SerializeField] private ThirdPersonOrbitCamera orbitCamera;
@@ -51,15 +62,16 @@ public sealed class AnimeCharacterController : MonoBehaviour
     private float takeoffTimer = -1f; // >= 0 while the push-off animation plays before leaving the ground
 
     public float CurrentSpeed => currentSpeedMagnitude;
-    public bool IsSprinting => currentSpeedMagnitude > runSpeed + 0.1f;
+    /// <summary>True while she is running (faster than the walk); the camera widens its FOV with it.</summary>
+    public bool IsSprinting => currentSpeedMagnitude > walkSpeed + 0.1f;
     private float JumpVelocity => Mathf.Sqrt(jumpHeight * -2.0f * gravity); // v = sqrt(h * -2 * g)
     public bool IsGrounded => controller.isGrounded || Physics.CheckSphere(transform.position + Vector3.up * 0.1f, 0.2f, groundLayer, QueryTriggerInteraction.Ignore);
 
     // Automation / Testing overrides
     public static Vector2 InputOverride = Vector2.zero;
     public static bool UseInputOverride = false;
-    public static bool SprintOverride = false;
-    public static bool WalkOverride = false;
+    public static bool SprintOverride = false;  // = Shift held (RUN). The name is kept for the dev capture scripts.
+    public static bool WalkOverride = false;    // no longer used: walking is the default now
     public static bool JumpOverride = false; // consumed by the next jump check
 
     private void Awake()
@@ -124,21 +136,11 @@ public sealed class AnimeCharacterController : MonoBehaviour
             transform.rotation = Quaternion.Euler(0f, smoothedAngle, 0f);
         }
 
+        // Walk is the standard; run only while Shift is held.
         float targetSpeed = 0f;
         if (inputMagnitude > 0.01f)
         {
-            if (IsSprintPressed())
-            {
-                targetSpeed = sprintSpeed;
-            }
-            else if (IsWalkPressed())
-            {
-                targetSpeed = walkSpeed;
-            }
-            else
-            {
-                targetSpeed = runSpeed;
-            }
+            targetSpeed = IsRunPressed() ? runSpeed : walkSpeed;
         }
 
         // Accelerate/decelerate instead of snapping, and keep moving along the last direction while
@@ -166,7 +168,7 @@ public sealed class AnimeCharacterController : MonoBehaviour
             if (takeoffTimer < 0f && IsJumpTriggered())
             {
                 takeoffTimer = jumpTakeoffDelay;
-                if (animator != null)
+                if (animator != null && jumpAnimationAvailable)
                 {
                     animator.SetTrigger(JumpHash);
                 }
@@ -190,10 +192,22 @@ public sealed class AnimeCharacterController : MonoBehaviour
     private static readonly int AirProgressHash = Animator.StringToHash("AirProgress");
     private static readonly int JumpHash = Animator.StringToHash("Jump");
     private static readonly int SpecialIdleHash = Animator.StringToHash("SpecialIdle");
+    private static readonly int SpecialTagHash = Animator.StringToHash(NinoLocomotionTags.Special);
+
+    // The idle face (blinks, smile) runs on its own layer; while a special plays, its own face curves take over.
+    private void UpdateFaceLayer()
+    {
+        if (animator.layerCount <= faceLayer) return;
+        bool special = animator.GetCurrentAnimatorStateInfo(0).tagHash == SpecialTagHash;
+        if (animator.IsInTransition(0)) special |= animator.GetNextAnimatorStateInfo(0).tagHash == SpecialTagHash;
+        faceWeight = Mathf.SmoothDamp(faceWeight, special ? 0f : 1f, ref faceWeightVelocity, faceFadeTime);
+        animator.SetLayerWeight(faceLayer, faceWeight);
+    }
 
     private void UpdateAnimator()
     {
         if (animator == null) return;
+        UpdateFaceLayer();
         animator.SetFloat(SpeedHash, currentSpeedMagnitude); // already smoothed in HandleMovement
         animator.SetBool(IsGroundedHash, IsGrounded);
         animator.SetFloat(VerticalVelocityHash, verticalVelocity.y);
@@ -261,29 +275,23 @@ public sealed class AnimeCharacterController : MonoBehaviour
         return false;
     }
 
-    private bool IsSprintPressed()
+    /// <summary>Shift (held) = run. Walking is the default.</summary>
+    private bool IsRunPressed()
     {
         if (UseInputOverride) return SprintOverride;
 
 #if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed) return true;
+        if (Keyboard.current != null && (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed)) return true;
 #endif
 #if ENABLE_LEGACY_INPUT_MANAGER
-        try { if (Input.GetKey(KeyCode.LeftShift)) return true; } catch { }
+        try { if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) return true; } catch { }
 #endif
         return false;
     }
+}
 
-    private bool IsWalkPressed()
-    {
-        if (UseInputOverride) return WalkOverride;
-
-#if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null && Keyboard.current.leftCtrlKey.isPressed) return true;
-#endif
-#if ENABLE_LEGACY_INPUT_MANAGER
-        try { if (Input.GetKey(KeyCode.LeftControl)) return true; } catch { }
-#endif
-        return false;
-    }
+/// <summary>Animator state tags shared by the controller builder (editor) and the movement script.</summary>
+public static class NinoLocomotionTags
+{
+    public const string Special = "Special";
 }
